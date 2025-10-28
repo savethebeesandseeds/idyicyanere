@@ -9,10 +9,13 @@ This console app helps to create books or scientific papaers quickly.
 ![Settings window demo](resources/settings_example.png)
 
 ## Start the container
+```cmd
 docker run --name=idyicyanere --gpus all -it -v $PWD//:/idyicyanere debian:latest
 docker exec -it idyicyanere /bin/bash
+```
 
 ## Install dependencies
+```bash
 apt update -y
 apt upgrade -y
 apt install -y --no-install-recommends curl
@@ -24,19 +27,28 @@ apt install -y --no-install-recommends libjansson-dev
 apt install -y --no-install-recommends openssh-client
 apt install -y --no-install-recommends ca-certificates
 update-ca-certificates
+```
 
 # Env
+```bash
 Create a .env file, base on example.env
+```
 
 # Build (optional)
+```bash
 cd idyicyanere/
 make .
+```
 
 # Run the code
 
 ### Import the env variables
+```bash
 cd idyicyanere/
 source .env
+```
 
 ### Start the code
+```bash
 ./idyicyanere examples/
+```
