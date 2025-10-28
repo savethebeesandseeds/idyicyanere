@@ -4,9 +4,9 @@ This console app helps to create books or scientific papaers quickly.
 
 ![Editor window demo](resources/editor_example.png)
 
-![Logs window demo](resources/logs_example.png)
+![Context window demo](resources/context_example.png)
 
-![Settings window demo](resources/settings_example.png)
+![Logs window demo](resources/logs_example.png)
 
 ## Start the container
 ```cmd
