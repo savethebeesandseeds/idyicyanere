@@ -1,7 +1,9 @@
 #ifndef IDY_H
 #define IDY_H
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,5 +34,9 @@ void buf_init(buffer_t *b);
 void buf_free(buffer_t *b);
 bool buf_load_file(buffer_t *b, const char *path);
 bool buf_save_file(buffer_t *b, const char *path);
+
+/* ===== Env helpers (trim whitespace incl. stray \r/\n) ===== */
+char* idy_getenv_trimdup(const char *key);  // malloc'd, trimmed; NULL if unset/empty
+int   idy_env_truthy(const char *key);      // 1 if {1,true,yes,on,y} (case-insensitive), else 0
 
 #endif

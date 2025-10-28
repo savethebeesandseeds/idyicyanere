@@ -2,6 +2,7 @@
 
 // Minimal unified-diff applier for a single file. Supports multiple hunks.
 // Strategy: split original into lines; parse hunks; rebuild output.
+static char* xstrndup(const char *s, size_t n){ char *p = (char*)malloc(n+1); if(!p) return NULL; memcpy(p,s,n); p[n]=0; return p; }
 typedef struct { char **v; size_t n; } lines_t;
 
 static lines_t split_lines(const char *s){
@@ -27,8 +28,7 @@ static void free_lines(lines_t *L){ for(size_t i=0;i<L->n;i++) free(L->v[i]); fr
 
 static bool parse_hunk_header(const char *s, long *o_start,long *o_len,long *n_start,long *n_len){
     // @@ -oldStart,oldLen +newStart,newLen @@
-    int m=sscanf(s,"@@ -%ld,%ld +%ld,%ld @@",
-                 o_start,o_len,n_start,n_len);
+    int m=sscanf(s,"@@ -%ld,%ld +%ld,%ld @@", o_start,o_len,n_start,n_len);
     if(m==4) return true;
     // single-line form like @@ -12 +12 @@
     m=sscanf(s,"@@ -%ld +%ld @@", o_start, n_start);
@@ -58,18 +58,18 @@ bool apply_unified_diff(const char *orig, const char *diff,
         // Extract header line
         const char *eol = strchr(cur, '\n'); if(!eol) eol = cur + strlen(cur);
         size_t hlen = (size_t)(eol - cur);
-        char *hdr = strndup(cur, hlen);
+        char *hdr = strndup(cur, hlen); // keep until after parse for error context
 
         long o_start=0,o_len=0,n_start=0,n_len=0;
         bool ok = parse_hunk_header(hdr, &o_start,&o_len,&n_start,&n_len);
+        if(!ok){ if(errmsg){ asprintf(errmsg, "Malformed hunk header: %.*s", (int)hlen, cur); } free(hdr); goto fail; }
         free(hdr);
-        if(!ok){ if(errmsg) *errmsg=strdup("Malformed hunk header"); goto fail; }
 
         // Convert to 0-based
         long oidx_target = o_start - 1;
 
         // Copy unchanged lines up to hunk start
-        while((long)oidx < oidx_target && oidx < (long)O.n){
+        while(oidx < (size_t)oidx_target && oidx < O.n){
             OV[on++] = strdup(O.v[oidx++]);
             if(on==cap){ cap*=2; OV = realloc(OV, sizeof(char*)*cap); }
         }
@@ -89,17 +89,22 @@ bool apply_unified_diff(const char *orig, const char *diff,
             const char *txt = bp+1;
             if(tag==' '){
                 // context: must match original
-                if(oidx >= O.n){ if(errmsg) *errmsg=strdup("Context beyond EOF"); goto fail; }
+                if(oidx >= O.n){
+                    if(errmsg) asprintf(errmsg, "Context beyond EOF (orig_idx=%zu, orig_lines=%zu, hunk -%ld,%ld +%ld,%ld)",
+                                        (size_t)oidx, O.n, o_start,o_len,n_start,n_len);
+                    goto fail;
+                }
                 // Optionally verify match—skip for brevity
                 OV[on++] = strdup(O.v[oidx++]);
             }else if(tag=='-'){
                 // deletion: skip a line of original
-                if(oidx >= O.n){ if(errmsg) *errmsg=strdup("Delete beyond EOF"); goto fail; }
+                if(oidx >= O.n){ if(errmsg) asprintf(errmsg, "Delete beyond EOF (orig_idx=%zu, orig_lines=%zu, hunk -%ld,%ld +%ld,%ld)", (size_t)oidx, O.n, o_start,o_len,n_start,n_len); goto fail; }
                 oidx++;
             }else if(tag=='+'){
-                char *ins = strndup(txt, len-1 >=0? len-1:0); // drop NL if any
-                // Re-add newline
-                char *ins2; asprintf(&ins2, "%s\n", ins);
+                size_t tlen = (len>0)? (len-1) : 0; // exclude '+' prefix
+                char *ins = xstrndup(txt, tlen);
+                // Re-add newline to keep line semantics
+                char *ins2 = NULL; asprintf(&ins2, "%s\n", ins?ins:"");
                 free(ins);
                 OV[on++] = ins2;
             }else if(tag=='\\'){
@@ -120,12 +125,14 @@ bool apply_unified_diff(const char *orig, const char *diff,
     for(size_t i=0;i<on;i++){ size_t L=strlen(OV[i]); memcpy(w,OV[i],L); w+=L; }
     *w=0; *out=res;
 
-    for(size_t i=0;i<on;i++) free(OV[i]); free(OV);
+    for(size_t i=0;i<on;i++){ free(OV[i]); }
+    free(OV);
     free_lines(&O);
     return true;
 
 fail:
-    for(size_t i=0;i<on;i++) free(OV[i]); free(OV);
+    for(size_t i=0;i<on;i++){ free(OV[i]); }
+    free(OV);
     free_lines(&O);
     return false;
 }
