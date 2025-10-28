@@ -49,6 +49,7 @@ source .env
 ```
 
 ### Start the code
+Run ./idyicyanere and pass a path to a file or a folder as an argument. 
 ```bash
 ./idyicyanere examples/
 ```
