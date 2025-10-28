@@ -1,6 +1,8 @@
 #include "idy.h"
 #include <ctype.h>
 #include <string.h>
+#include <errno.h>
+#include <limits.h>
 
 /* Return a newly-allocated copy of the environment value with
    leading/trailing ASCII whitespace removed. If the variable is
@@ -38,4 +40,49 @@ int idy_env_truthy(const char *key){
     int yes = idy__ieq(t,"1") || idy__ieq(t,"true") || idy__ieq(t,"yes") || idy__ieq(t,"on") || idy__ieq(t,"y");
     free(t);
     return yes;
+}
+
+/* Parse size strings like: "65536", "64k", "64K", "1m", "2G", "64KiB", "4 MiB".
+   On error or non-positive values returns def_value. */
+size_t idy_env_parse_size(const char *key, size_t def_value){
+    char *s = idy_getenv_trimdup(key);
+    if(!s || !*s){
+        free(s);
+        return def_value;
+    }
+
+    const char *p = s;
+    errno = 0;
+    char *endp = NULL;
+    unsigned long long base = strtoull(p, &endp, 10);
+
+    // Skip spaces after the number
+    while(endp && *endp && isspace((unsigned char)*endp)) endp++;
+
+    // Detect unit (first non-space letter is enough; accept KiB/MiB/GiB variants)
+    unsigned long long mult = 1;
+    if(endp && *endp){
+        char u = (char)toupper((unsigned char)*endp);
+        if(u == 'K') mult = 1024ULL;
+        else if(u == 'M') mult = 1024ULL * 1024ULL;
+        else if(u == 'G') mult = 1024ULL * 1024ULL * 1024ULL;
+        else mult = 1; // treat unknown suffix as bytes
+    }
+
+    // Safety: invalid or non-positive -> default
+    if(errno == ERANGE || base == 0ULL){
+        free(s);
+        return def_value;
+    }
+
+    // Multiply with saturation to ULLONG_MAX
+    unsigned long long val;
+    if(mult != 0 && base > ULLONG_MAX / mult) val = ULLONG_MAX;
+    else val = base * mult;
+
+    // Clamp to SIZE_MAX if needed
+    if(val > (unsigned long long)SIZE_MAX) val = (unsigned long long)SIZE_MAX;
+
+    free(s);
+    return (size_t)val;
 }

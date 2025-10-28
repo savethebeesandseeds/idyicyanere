@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-// Build the context preview string for the Settings panel.
+// Build the context preview string for the Context panel.
 //  - cwd: header root displayed at the top
 //  - paths: absolute file paths to include
 //  - count: number of paths

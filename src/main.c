@@ -18,8 +18,8 @@ static char *RIGHTBUF=NULL, *STATUS=NULL;
 static screen_t g_screen = SCREEN_EDITOR;
 static log_level_t LOG_FILTER = LOG_INFO;
 
-static char CWD[PATH_MAX];         // current directory in settings view
-static int  SEL_INDEX = 0;         // selection in settings list
+static char CWD[PATH_MAX];         // current directory in Context view
+static int  SEL_INDEX = 0;         // selection in Context list
 static file_list_t FL = {0};
 
 // Current open file path (for editor buffer)
@@ -37,6 +37,9 @@ static int   CTX_SCROLL = 0;
 
 // Logs view scroll offset (in visual rows from bottom; 0 = follow tail)
 static int   LOG_SCROLL = 0;
+
+// Logs right-pane (Config block) vertical scroll (0 = top of Config)
+static int   LOG_RHS_SCROLL = 0;
 
 // Blink timer
 static bool BLINK_STATE=false;
@@ -67,11 +70,12 @@ static void on_done_cb(json_t *usage, void *user){
             if(len>=2 && p[0]=='@' && p[1]=='@') hunks++;
             else if(len>=1 && p[0]=='+') add++;
             else if(len>=1 && p[0]=='-') del++;
-            if(!nl) break; p = nl+1;
+            if(!nl) break;
+            p = nl+1;
         }
         int orig_lines = editor_total_lines(ed->doc);
         double ratio = (orig_lines>0) ? ((double)(add + del) / (double)orig_lines) : 0.0;
-        LOG_DEBUG("Streaming suggestions finished. diff_stats: hunks=%d, +%d, -%d, orig_lines=%d, change_ratio=%.3f",
+        LOG_TRACE("Streaming suggestions finished. diff_stats: hunks=%d, +%d, -%d, orig_lines=%d, change_ratio=%.3f",
                   hunks, add, del, orig_lines, ratio);
     } else {
         LOG_DEBUG("Streaming suggestions finished.");
@@ -125,8 +129,40 @@ static void hex8_of_doc(const buffer_t *b, char out[9]){
     memcpy(out, h, 8); out[8]=0;
 }
 
-/* Open the item at `selpath` exactly like pressing Enter in Settings.
-   - Dir: cd into it (rebuild listing + keep on Settings, rebuild preview)
+// Render doc as a line-numbered view: each line starts with
+// "<N>| " where N is 1-based and right-aligned to the max digit width.
+// Returns malloc'ed string (caller frees). For empty docs, returns strdup("").
+static int dec_digits_(int n){ int d=1; while(n>=10){ n/=10; d++; } return d; }
+
+static char* build_numbered_original(const buffer_t *b){
+    if(!b || !b->data || b->len == 0) return strdup("");
+    int total_lines = editor_total_lines(b);
+    int digits = dec_digits_(total_lines);
+
+    // Worst-case extra per line: digits + 2 (for "| ")
+    size_t extra = (size_t)total_lines * (size_t)(digits + 2);
+    char *out = (char*)malloc(b->len + extra + 1);
+    if(!out) return NULL;
+
+    char *w = out;
+    int line = 1;
+    w += sprintf(w, "%*d| ", digits, line);
+
+    for(size_t i=0; i<b->len; ++i){
+        char c = b->data[i];
+        *w++ = c;
+        if(c == '\n' && i + 1 < b->len){
+            line++;
+            w += sprintf(w, "%*d| ", digits, line);
+        }
+    }
+    *w = '\0';
+    return out;
+}
+
+
+/* Open the item at `selpath` exactly like pressing Enter in Context.
+   - Dir: cd into it (rebuild listing + keep on Context, rebuild preview)
    - File: open into editor (switch screen) */
 static void open_item_by_path(const char *selpath, editor_t *ed, bool *need_preview_rebuild){
     if(!selpath) return;
@@ -165,9 +201,42 @@ int main(int argc, char **argv){
         .model = idy_getenv_trimdup("OPENAI_MODEL"),
         .api_key = idy_getenv_trimdup("OPENAI_API_KEY"),
         .base_url = idy_getenv_trimdup("OPENAI_BASE_URL"),
-        .system_prompt = NULL
+        .system_prompt_unified_diff =
+            "You are a scientific writing copilot. Return ONLY a valid unified diff patch (single file) for the ORIGINAL text I provide. Keep LaTeX valid."
+            "\n\n"
+            "LINE-NUMBERED VIEW (IMPORTANT): The ORIGINAL is shown with fixed-width line numbers at the start of each line, in the form \"<N>| <content>\", where N is the 1-based line number. "
+            "These prefixes are METADATA only. When constructing the unified diff:\n"
+            " - Read the actual document text as the substring after the first \"| \" on each line.\n"
+            " - NEVER include the numeric prefixes in any context (' '), deletion ('-'), or insertion ('+') lines.\n"
+            " - Use the visible numbers to compute @@ header starts (oldStart). Lengths are counts of lines as usual.\n"
+            " - If the true line begins with '+', '-' or a space, keep it; only strip the \"<N>| \" prefix.\n"
+            "\n"
+            "Strict output format (no prose, no code fences):\n"
+            "1) First two lines must be exactly:\n"
+            "--- original.tex\n"
+            "+++ original.tex\n"
+            "2) Each hunk header MUST be one of:\n"
+            "@@ -<oldStart>,<oldLen> +<newStart>,<newLen> @@\n"
+            "@@ -<oldStart> +<newStart> @@   (shorthand: lengths are 1)\n"
+            "3) Hunk body line prefixes:\n"
+            "   space = unchanged context\n"
+            "   '-'   = line removed from the original\n"
+            "   '+'   = line added in the new version\n"
+            "4) Use \\n newlines. If a changed line has no trailing newline, add the marker line:\n"
+            "\\ No newline at end of file\n"
+            "5) Compute line numbers from the ORIGINAL (the numbered view). For full rewrites, use:\n"
+            "@@ -1,<oldLen> +1,<newLen> @@\n"
+            "6) Do NOT include any extra metadata (no 'diff --git', 'index' lines, comments, or explanations).\n"
+            "7) The patch must apply cleanly to the ORIGINAL text without fuzzy matching. Preserve LaTeX correctness.",
+        // New: prompt caps (env overrides; fall back to stream.h defaults)
+        .prompt_max_orig = 0,
+        .prompt_max_ctx  = 0
     };
     if(!cfg.api_key){ fprintf(stderr,"OPENAI_API_KEY is required\n"); return 1; }
+
+    // Resolve prompt caps from env (bytes). Defaults come from stream.h.
+    cfg.prompt_max_orig = idy_env_parse_size("IDY_PROMPT_MAX_ORIG", IDY_PROMPT_MAX_ORIG);
+    cfg.prompt_max_ctx  = idy_env_parse_size("IDY_PROMPT_MAX_CTX",  IDY_PROMPT_MAX_CTX);
 
     /* Bounded log ring: allow IDY_LOG_CAP (clamped), default 1024 */
     int cap = 1024;
@@ -183,6 +252,8 @@ int main(int argc, char **argv){
     }
     log_init((size_t)cap);
     LOG_INFO("idyicyanere starting (v%s)", IDY_VERSION);
+    LOG_DEBUG("Prompt caps (effective): orig=%zu bytes, ctx=%zu bytes",
+              (size_t)cfg.prompt_max_orig, (size_t)cfg.prompt_max_ctx);
 
     buffer_t doc; buf_init(&doc);
     editor_t ed; editor_init(&ed, &doc);
@@ -195,17 +266,17 @@ int main(int argc, char **argv){
         strncpy(startpath, arg, sizeof(startpath)-1); startpath[sizeof(startpath)-1]='\0';
     }
     if(fs_is_dir(startpath)){
-        strncpy(CWD, startpath, sizeof(CWD)-1);
-        g_screen = SCREEN_SETTINGS;
+        snprintf(CWD, sizeof(CWD), "%s", startpath);
+        g_screen = SCREEN_CONTEXT;
         list_dir(CWD, &FL);
-        LOG_INFO("Started in directory mode: %s", CWD);
+        LOG_INFO("Started in directory mode (Context): %s", CWD);
     } else if(fs_is_file(startpath)){
         if(!buf_load_file(&doc, startpath)){ fprintf(stderr,"failed to read %s\n",startpath); return 1; }
         editor_init(&ed, &doc);
         snprintf(CURRENT_FILE, sizeof(CURRENT_FILE), "%s", startpath);
         HAS_CURRENT_FILE = true;
-        strncpy(CWD, startpath, sizeof(CWD)-1);
-        char *dir = dirname(CWD); strncpy(CWD, dir, sizeof(CWD)-1);
+        snprintf(CWD, sizeof(CWD), "%s", startpath);
+        char *dir = dirname(CWD); snprintf(CWD, sizeof(CWD), "%s", dir);
         LOG_INFO("Opened file: %s", startpath);
     } else {
         fprintf(stderr,"Path not found: %s\n", arg); return 1;
@@ -222,7 +293,7 @@ int main(int argc, char **argv){
         free(CTX_PREVIEW);
         CTX_PREVIEW = preview_build(CWD, CTX_FILES, CTX_COUNT, &CTX_PREVIEW_LINES);
         if(CTX_SCROLL > CTX_PREVIEW_LINES) CTX_SCROLL = CTX_PREVIEW_LINES;
-        tui_draw_settings(&T, CWD, &FL, SEL_INDEX, &cfg, CTX_FILES, CTX_COUNT, CTX_PREVIEW, CTX_SCROLL, STATUS);
+        tui_draw_context(&T, CWD, &FL, SEL_INDEX, &cfg, CTX_FILES, CTX_COUNT, CTX_PREVIEW, CTX_SCROLL, STATUS);
     }
 
     int ch; bool running=true;
@@ -251,15 +322,15 @@ int main(int argc, char **argv){
         else if((ch==17)){ running=false; break; } // Ctrl-Q
 
         // Global screen switching
-        else if(ch==KEY_F(1)){ g_screen=SCREEN_EDITOR; LOG_DEBUG("Switch to Editor"); }
-        else if(ch==KEY_F(2)){ g_screen=SCREEN_LOGS; LOG_DEBUG("Switch to Logs"); }
-        else if(ch==KEY_F(3)){
-            g_screen=SCREEN_SETTINGS; LOG_DEBUG("Switch to Settings");
+        else if(ch==KEY_F(1)){ g_screen=SCREEN_EDITOR; LOG_TRACE("Switch to Editor"); }
+        else if(ch==KEY_F(2)){
+            g_screen=SCREEN_CONTEXT; LOG_TRACE("Switch to Context");
             if(!FL.items){ list_dir(CWD, &FL); }
             free(CTX_PREVIEW);
             CTX_PREVIEW = preview_build(CWD, CTX_FILES, CTX_COUNT, &CTX_PREVIEW_LINES);
             if(CTX_SCROLL > CTX_PREVIEW_LINES) CTX_SCROLL = CTX_PREVIEW_LINES;
         }
+        else if(ch==KEY_F(3)){ g_screen=SCREEN_LOGS; LOG_TRACE("Switch to Logs"); }
  
         if(g_screen==SCREEN_EDITOR){
             // Editing controls
@@ -273,12 +344,19 @@ int main(int argc, char **argv){
                 const char *base = cfg.base_url ? cfg.base_url : "(auto https://api.openai.com/v1)";
                 const char *model = (cfg.model && *cfg.model) ? cfg.model : "gpt-4o-mini";
                 LOG_DEBUG("Suggest request started (model=%s base=%s, orig_bytes=%zu, orig_lines=%d, sha256=%s…)",
-                          model, base, doc.len, lines0, hx);
+                    model, base, doc.len, lines0, hx);
+                LOG_TRACE("Suggest: Context content: %s", CTX_PREVIEW);
                 stream_ctx_t sctx = { .cfg=&cfg, .on_delta=on_delta_cb, .on_done=on_done_cb, .user=&ed };
-                if(!openai_stream_unified_diff(&sctx, doc.data, NULL)){
+                char *orig_numbered = build_numbered_original(&doc);  // malloc'ed
+                const char *orig_for_model = orig_numbered ? orig_numbered : doc.data;
+                if(!openai_stream_unified_diff(&sctx, orig_for_model, CTX_PREVIEW, NULL)){
                     free(STATUS); STATUS=strdup("Suggestion request failed.");
                     LOG_ERROR("Streaming suggestions failed."); // detailed cause logged in stream.c
+                } else {
+                    int lines0 = editor_total_lines(&doc);
+                    LOG_TRACE("Suggest: sent line-numbered ORIGINAL (lines=%d).", lines0);
                 }
+                free(orig_numbered);
             } else if(ch==1){ // Ctrl-A => Apply
                 if(!RIGHTBUF || !*RIGHTBUF){ free(STATUS); STATUS=strdup("No diff to apply."); LOG_WARN("Apply requested with no diff."); }
                 else {
@@ -289,7 +367,8 @@ int main(int argc, char **argv){
                         if(len>=2 && p[0]=='@' && p[1]=='@') hunks++;
                         else if(len>=1 && p[0]=='+') add++;
                         else if(len>=1 && p[0]=='-') del++;
-                        if(!nl) break; p=nl+1;
+                        if(!nl) break;
+                        p=nl+1;
                     }
                     int lines_before = editor_total_lines(&doc);
                     char hx_before[9]; hex8_of_doc(&doc, hx_before);
@@ -425,9 +504,10 @@ int main(int argc, char **argv){
                 int n = ch - '1';
                 LOG_FILTER = (log_level_t)n;
                 LOG_SCROLL = 0; // jump to newest when changing filter
+                // keep right-pane scroll as-is
                 char *s; asprintf(&s,"Log filter -> %s", log_level_name(LOG_FILTER));
                 free(STATUS); STATUS=s;
-                LOG_DEBUG("Log filter set to %s", log_level_name(LOG_FILTER));
+                LOG_TRACE("Log filter set to %s", log_level_name(LOG_FILTER));
             } else if(ch==KEY_UP){ LOG_SCROLL += 1; }
             else if(ch==KEY_DOWN){ if(LOG_SCROLL>0) LOG_SCROLL -= 1; }
             else if(ch==KEY_PPAGE){ LOG_SCROLL += pane_rows - 1; }
@@ -436,20 +516,38 @@ int main(int argc, char **argv){
             else if(ch==KEY_END){ LOG_SCROLL = 0; }
             else if(ch==KEY_MOUSE){
                 MEVENT ev; if(getmouse(&ev)==OK){
-                    // wheel over LEFT pane scrolls logs
                     if(ev.x < T.split_col){
+                        // wheel over LEFT pane scrolls logs
 #ifdef BUTTON4_PRESSED
                         if(ev.bstate & (BUTTON4_PRESSED|BUTTON4_CLICKED)){ LOG_SCROLL += 3; }
 #endif
 #ifdef BUTTON5_PRESSED
-                        if(ev.bstate & (BUTTON5_PRESSED|BUTTON5_CLICKED)){ if(LOG_SCROLL>0){ int d = LOG_SCROLL>=3 ? 3 : LOG_SCROLL; LOG_SCROLL -= d; } }
+                        if(ev.bstate & (BUTTON5_PRESSED|BUTTON5_CLICKED)){
+                            if(LOG_SCROLL>0){
+                                int d = LOG_SCROLL>=3 ? 3 : LOG_SCROLL;
+                                LOG_SCROLL -= d;
+                            }
+                        }
+#endif
+                    } else {
+                        // wheel over RIGHT pane scrolls Config block
+#ifdef BUTTON4_PRESSED
+                        if(ev.bstate & (BUTTON4_PRESSED|BUTTON4_CLICKED)){
+                            if(LOG_RHS_SCROLL>0){
+                                int d = LOG_RHS_SCROLL>=3 ? 3 : LOG_RHS_SCROLL;
+                                LOG_RHS_SCROLL -= d;
+                            }
+                        }
+#endif
+#ifdef BUTTON5_PRESSED
+                        if(ev.bstate & (BUTTON5_PRESSED|BUTTON5_CLICKED)){ LOG_RHS_SCROLL += 3; }
 #endif
                     }
                 }
             }
-            tui_draw_logs(&T, LOG_FILTER, STATUS, &LOG_SCROLL);
+            tui_draw_logs(&T, LOG_FILTER, STATUS, &LOG_SCROLL, &LOG_RHS_SCROLL);
         }
-        else if(g_screen==SCREEN_SETTINGS){
+        else if(g_screen==SCREEN_CONTEXT){
             bool need_preview_rebuild = false;
 
             if(ch==KEY_UP && SEL_INDEX>0) SEL_INDEX--;
@@ -510,15 +608,15 @@ int main(int argc, char **argv){
             }
 
             // Draw the appropriate screen after possible state change
-            if(g_screen==SCREEN_SETTINGS){
-                tui_draw_settings(&T, CWD, &FL, SEL_INDEX, &cfg, CTX_FILES, CTX_COUNT, CTX_PREVIEW, CTX_SCROLL, STATUS);
+            if(g_screen==SCREEN_CONTEXT){
+                tui_draw_context(&T, CWD, &FL, SEL_INDEX, &cfg, CTX_FILES, CTX_COUNT, CTX_PREVIEW, CTX_SCROLL, STATUS);
             } else if(g_screen==SCREEN_EDITOR){
                 const char *fp = HAS_CURRENT_FILE ? CURRENT_FILE : "(untitled)";
                 tui_draw_editor(&T, &ed, RIGHTBUF, STATUS, fp);
             }
         }
 
-        // Extra function keys (logs & snippets)
+        // Extra function keys
         if(ch==KEY_F(5)){ // latexmk -pdf
             free(STATUS); STATUS=strdup("Running latexmk -pdf ...");
             LOG_DEBUG("latexmk -pdf started");

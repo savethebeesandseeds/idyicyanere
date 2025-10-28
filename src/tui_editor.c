@@ -14,6 +14,7 @@ static void draw_title_filepath(WINDOW *w, const char *filepath, bool dirty){
     if(dirty) asprintf(&full, "* %s", path); else asprintf(&full, "%s", path);
     if(!full) return;
 
+    if(has_colors()) wattron(w, COLOR_PAIR(IDY_PAIR_TITLE));
     int len = (int)strlen(full);
     if(len <= avail){
         mvwprintw(w, 0, 2, "%s", full);
@@ -23,13 +24,18 @@ static void draw_title_filepath(WINDOW *w, const char *filepath, bool dirty){
         const char *tail = full + (len - keep);
         mvwprintw(w, 0, 2, "...%s", tail);
     }
+    if(has_colors()) wattroff(w, COLOR_PAIR(IDY_PAIR_TITLE));
     free(full);
 }
 
 // Render left editor pane with gutter (line numbers), selection highlight, and soft-blink caret
 static void draw_editor_left(tui_t *t, editor_t *ed, const char *filepath){
     WINDOW *w = t->left;
-    werase(w); box(w,0,0);
+    werase(w);
+    if(t->colors_ready) wattron(w, COLOR_PAIR(IDY_PAIR_BORDER));
+    box(w,0,0);
+    if(t->colors_ready) wattroff(w, COLOR_PAIR(IDY_PAIR_BORDER));
+
     int rows = getmaxy(w)-2, cols = getmaxx(w)-2;
 
     // Title bar: file path (Ln/Col are shown in the status bar)
@@ -46,6 +52,7 @@ static void draw_editor_left(tui_t *t, editor_t *ed, const char *filepath){
     bool has_sel = editor_has_selection(ed);
     size_t sel_lo=0, sel_hi=0; if(has_sel) editor_get_selection(ed,&sel_lo,&sel_hi);
 
+    if(t->colors_ready) wattron(w, COLOR_PAIR(IDY_PAIR_TEXT));
     // find start index of top line
     size_t idx = editor_line_start_index(ed->doc, ed->top_line);
     int y=1, x=1+gutter, col=0;
@@ -54,9 +61,11 @@ static void draw_editor_left(tui_t *t, editor_t *ed, const char *filepath){
         char c = (i<ed->doc->len) ? ed->doc->data[i] : '\0';
         if(c=='\n' || c=='\0'){
             int lineno = ed->top_line + (y-1) + 1;
+            if(t->colors_ready) wattron(w, COLOR_PAIR(IDY_PAIR_GUTTER));
             wattron(w, A_DIM);
             mvwprintw(w, y, 1, "%*d ", lnw, lineno);
             wattroff(w, A_DIM);
+            if(t->colors_ready) wattroff(w, COLOR_PAIR(IDY_PAIR_GUTTER));
             if(attr_sel){ wattroff(w, A_REVERSE); attr_sel=false; }
             y++; x=1+gutter; col=0;
             if(c=='\0') break;
@@ -73,6 +82,7 @@ static void draw_editor_left(tui_t *t, editor_t *ed, const char *filepath){
         }
     }
     if(attr_sel){ wattroff(w, A_REVERSE); }
+    if(t->colors_ready) wattroff(w, COLOR_PAIR(IDY_PAIR_TEXT));
 
     // draw caret + soft blink overlay
     int crow, ccol; editor_cursor_row_col(ed, &crow, &ccol);
@@ -88,7 +98,11 @@ static void draw_editor_left(tui_t *t, editor_t *ed, const char *filepath){
 
 // Colorize unified diff in right pane
 static void draw_diff_right(WINDOW *w, const char *diff, bool colors_ready){
-    werase(w); box(w,0,0);
+    werase(w);
+    if(colors_ready) wattron(w, COLOR_PAIR(IDY_PAIR_BORDER));
+    box(w,0,0);
+    if(colors_ready) wattroff(w, COLOR_PAIR(IDY_PAIR_BORDER));
+
     int rows = getmaxy(w)-2, cols = getmaxx(w)-2;
     int y=1;
     if(!diff){ wrefresh(w); return; }
@@ -102,7 +116,7 @@ static void draw_diff_right(WINDOW *w, const char *diff, bool colors_ready){
             else if(len>=2 && strncmp(p,"@@",2)==0) pair=4;
             else if(len>=1 && p[0]=='+') pair=1;
             else if(len>=1 && p[0]=='-') pair=2;
-            else pair=0;
+            else pair=IDY_PAIR_TEXT;
         }
         int x=1;
         if(pair) wattron(w, COLOR_PAIR(pair));

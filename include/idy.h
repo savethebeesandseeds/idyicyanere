@@ -21,7 +21,11 @@ typedef struct {
     char *model;
     char *api_key;
     char *base_url;   // e.g. https://api.openai.com/v1
-    char *system_prompt;
+    char *system_prompt_unified_diff;
+
+    // Optional caps for prompt slices (0 = use compile defaults from stream.h)
+    size_t prompt_max_orig;
+    size_t prompt_max_ctx;
 } idy_config_t;
 
 typedef struct {
