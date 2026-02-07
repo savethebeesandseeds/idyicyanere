@@ -1,7 +1,8 @@
 import { log } from "../logging/logger";
 import * as fsp from "fs/promises";
-import * as fs from "fs";
 import * as path from "path";
+import * as fs from "fs";
+import type * as vscode from "vscode";
 
 type Metric = "cosine" | "l2";
 
@@ -37,9 +38,22 @@ const IDYDB_CREATE = 7;
 const IDYDB_SIM_COSINE = 1;
 const IDYDB_SIM_L2 = 2;
 
-function loadAddon() {
+export function loadAddon(context: vscode.ExtensionContext) {
+  const addonPath = path.join(
+    context.extensionPath,
+    "native",
+    "idydb-addon",
+    "build",
+    "Release",
+    "idydb.node"
+  );
+
+  if (!fs.existsSync(addonPath)) {
+    throw new Error(`idydb addon missing at: ${addonPath}`);
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return require("../../native/idydb-addon/build/Release/idydb.node");
+  return require(addonPath);
 }
 
 type ChunkMeta = {
@@ -63,9 +77,11 @@ export class IdyDbStore {
   // Serialize all native calls (open/close/query/write) to avoid lock races.
   private gate: Promise<void> = Promise.resolve();
 
-  constructor(private readonly dbPath: string) {
-    this.addon = loadAddon();
-    this.db = new this.addon.IdyDb();
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly dbPath: string) {
+      this.addon = loadAddon(context);
+      this.db = new this.addon.IdyDb();
   }
 
   private async runExclusive<T>(label: string, fn: () => T | Promise<T>): Promise<T> {

@@ -1,11 +1,11 @@
 77 + 1 = 
-
+# Use basic addition
 
 5/1 = 
-
+# Divide by one for the same number
 
 13/26=
-
-
+# Simplify the fraction
 
 9 ^ 2 = 
+# Apply exponentiation for square

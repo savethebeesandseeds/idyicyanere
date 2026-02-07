@@ -4,21 +4,28 @@
   "main": "./dist/extension.js",
   "description": "Intelligent file editing",
   "publisher": "waajacu",
+  "icon": "media/icon.png",
   "version": "0.3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/savethebeesandseeds/idyicyanere.git",
+    "directory": "idyicyanere-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/savethebeesandseeds/idyicyanere/issues"
+  },
+  "homepage": "https://github.com/savethebeesandseeds/idyicyanere#readme",
   "scripts": {
     "compile": "tsc -p .",
 
-    "native:clean": "node-gyp clean --directory native/idydb-addon",
-    "build:native": "node-gyp rebuild --directory native/idydb-addon",
-
     "vsix:clean": "node -e \"require('fs').rmSync('dist-vsix', {recursive:true, force:true}); require('fs').mkdirSync('dist-vsix', {recursive:true});\"",
-    "vsix:package": "node -e \"const {execSync}=require('child_process'); const os=process.platform; const arch=process.arch; const out=`dist-vsix/idyicyanere-${os}-${arch}.vsix`; execSync(`npx vsce package -o ${out}`,{stdio:'inherit'});\"",
+    "vsix:package": "node -e \"const {execSync}=require('child_process'); const out='dist-vsix/idyicyanere-'+process.platform+'-'+process.arch+'.vsix'; execSync('npx vsce package -o '+out,{stdio:'inherit'});\"",
 
-    "vsix:local": "npm run vsix:clean && npm run compile && npm run build:native && npm run vsix:package",
+    "vsix:deps:dev": "npm ci",
+    "vsix:deps:prod": "npm ci --omit=dev",
 
-    "vsix:linux": "npm run vsix:local",
-    "vsix:darwin": "npm run vsix:local",
-    "vsix:win32": "npm run vsix:local"
+    "vsix:linux:fast": "npm run vsix:clean && npm run vsix:deps:dev && npm run compile && npm run vsix:deps:prod && npm run vsix:package",
+    "vsix:local": "npm run vsix:clean && npm run vsix:deps:dev && npm run compile && npm run build:native && npm run vsix:deps:prod && npm run vsix:package"
   },
   "contributes": {
     "keybindings": [
@@ -91,9 +98,10 @@
   "files": [
     "dist/**",
     "media/**",
-    "native/idydb-addon/build/Release/*.node",
+    "native/idydb-addon/build/Release/**/*",
     "native/idydb-addon/idydb/include/**",
     "package.json",
+    "node_modules/**",
     "README.md",
     "LICENSE"
   ]

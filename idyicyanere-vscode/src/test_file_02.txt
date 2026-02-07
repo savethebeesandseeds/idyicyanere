@@ -1,11 +1,11 @@
 1+1=
-
+# Hint: Simple addition
 
 10+10=
-
-
+# Hint: Simple addition
 
 14+17=
-
+# Hint: Simple addition
 
 12+4=
+# Hint: Simple addition

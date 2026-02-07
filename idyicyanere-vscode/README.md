@@ -32,54 +32,41 @@ sudo apt-get update
 sudo apt-get install -y build-essential python3 make g++ libssl-dev
 
 npm ci
-npm run vsix:linux
-ls -lh dist-vsix/idyicyanere-linux.vsix
+npm run vsix:local
+
+## Install
+In VS Code: press Ctrl+Shift+P → run “Extensions: Install from VSIX…” → pick dist-vsix/idyicyanere-linux-x64.vsix.
 
 ### Install the VSIX:
+ls -lh dist-vsix/idyicyanere-linux-x64.vsix
+code --install-extension dist-vsix/idyicyanere-linux-x64.vsix
 
-code --install-extension dist-vsix/idyicyanere-linux.vsix
 #### or for VS Code Insiders:
-code-insiders --install-extension dist-vsix/idyicyanere-linux.vsix
-
-
-
-
-# macOS
-Install OpenSSL via Homebrew and expose include/lib paths for node-gyp:
-brew install openssl@3
-export OPENSSL_INCLUDE_DIR="$(brew --prefix openssl@3)/include"
-export OPENSSL_LIB_DIR="$(brew --prefix openssl@3)/lib"
-
-npm ci
-npm run vsix:darwin
-ls -lh dist-vsix/idyicyanere-darwin.vsix
-
-
-### Install the VSIX:
-
-code --install-extension dist-vsix/idyicyanere-darwin.vsix
-### or:
-code-insiders --install-extension dist-vsix/idyicyanere-darwin.vsix
-
+code-insiders --install-extension dist-vsix/idyicyanere-linux-x64.vsix
 
 
 # Windows (PowerShell)
 
-### You need OpenSSL headers + .lib files. Set env vars so node-gyp can find them:
-$env:OPENSSL_INCLUDE_DIR="C:\path\to\openssl\include"
-$env:OPENSSL_LIB_DIR="C:\path\to\openssl\lib"
+### windows installs
+winget install -e --id ShiningLight.OpenSSL
+winget install -e --id OpenJS.NodeJS.LTS
+winget install -e --id Python.Python.3
+winget install -e --id Git.Git
 
+### set these to the actual OpenSSL path on your machine
+$env:OPENSSL_DIR="C:\Program Files\OpenSSL-Win64"
+$env:OPENSSL_INCLUDE_DIR="$env:OPENSSL_DIR\include"
+$env:OPENSSL_LIB_DIR="$env:OPENSSL_DIR\lib"
+
+### node installs
 npm ci
-npm run vsix:win32
-dir dist-vsix
+npm run compile
+npm run build:native
+npm run vsix:package
 
 ### Install the VSIX:
-
+In VS Code: press Ctrl+Shift+P → run “Extensions: Install from VSIX…” → pick dist-vsix/idyicyanere-linux-x64.vsix.
+### or:
 code --install-extension dist-vsix\idyicyanere-win32.vsix
 ### or:
 code-insiders --install-extension dist-vsix\idyicyanere-win32.vsix
-
-
-### If you’re using vcpkg, these env vars typically look like:
-$env:OPENSSL_INCLUDE_DIR="C:\path\to\vcpkg\installed\x64-windows\include"
-$env:OPENSSL_LIB_DIR="C:\path\to\vcpkg\installed\x64-windows\lib"

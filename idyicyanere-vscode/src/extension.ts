@@ -218,7 +218,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const contextDump = new ContextDumpService(paths, config, manifest);
 
   // Native vector store (IdyDB C++ addon)
-  const store = new IdyDbStore(paths.dbPath);
+  const store = new IdyDbStore(context, paths.dbPath);
   await store.open();
 
   const openai = new OpenAIService(context, config);
