@@ -1,1 +1,0 @@
-cmd_Release/obj.target/idydb.node := g++ -o Release/obj.target/idydb.node -shared -pthread -rdynamic -m64  -Wl,-soname=idydb.node -Wl,--start-group Release/obj.target/idydb/addon.o Release/obj.target/idydb/idydb/impl/db.o Release/obj.target/../../node_modules/node-addon-api/nothing.a -Wl,--end-group -lssl -lcrypto

@@ -4,6 +4,7 @@ parse_context.sh
 
 node_modules/
 out/
+build/
 dist/
 dist-vsix/
 *.vsix
