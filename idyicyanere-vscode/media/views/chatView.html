@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="__CSP__';"
+  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>idyicyanere Chat</title>
+  <style>
+    body { font-family: var(--vscode-font-family); padding: 10px; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap: 8px; }
+    .hint { opacity: 0.8; margin: 6px 0 10px; }
+    .row { display:flex; gap: 8px; align-items: center; }
+    textarea {
+      width: 100%;
+      min-height: 70px;
+      resize: vertical;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+      padding: 8px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
+    button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    /* chat */
+    #chat {
+      margin-top: 10px;
+      border-top: 1px solid var(--vscode-editorWidget-border);
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: auto;
+      max-height: calc(100vh - 220px);
+    }
+    .bubbleRow { display:flex; width:100%; }
+    .bubble {
+      max-width: 88%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      white-space: pre-wrap;
+      line-height: 1.35;
+      border: 1px solid var(--vscode-editorWidget-border);
+    }
+    .userRow { justify-content: flex-end; }
+    .userBubble {
+      background: var(--vscode-input-background);
+    }
+    .assistantRow { justify-content: flex-start; }
+    .assistantBubble {
+      background: var(--vscode-editor-background);
+    }
+    .meta {
+      font-size: 11px;
+      opacity: 0.7;
+      margin-top: 4px;
+    }
+    .err {
+      color: var(--vscode-errorForeground);
+      border-color: var(--vscode-errorForeground);
+    }
+    .statusLine { opacity: 0.8; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <strong>Chat</strong>
+    <div class="row">
+      <button class="secondary" id="btnClear" title="Clear chat">Clear</button>
+    </div>
+  </div>
+
+  <div class="hint">Enter = send • Shift+Enter = newline</div>
+  <div class="statusLine" id="status"></div>
+
+  <textarea id="q" placeholder="Ask a question about your indexed code..."></textarea>
+  <div class="row" style="margin-top: 8px;">
+    <button id="ask">Ask</button>
+  </div>
+
+  <div id="chat"></div>
+
+  <script nonce="__NONCE__">
+    const vscode = acquireVsCodeApi();
+
+    // Forward webview JS errors to extension logs
+    window.addEventListener('error', (e) => {
+      vscode.postMessage({
+        type: 'clientError',
+        text: e.message || 'Webview error',
+        stack: e.error?.stack
+      });
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const reason = e.reason?.message ? e.reason.message : String(e.reason);
+      vscode.postMessage({
+        type: 'clientError',
+        text: reason || 'Unhandled rejection',
+        stack: e.reason?.stack
+      });
+    });
+
+    const q = document.getElementById('q');
+    const askBtn = document.getElementById('ask');
+    const chat = document.getElementById('chat');
+    const status = document.getElementById('status');
+
+    let busy = false;
+    let thinkTimer = null;
+    let thinkStep = 0;
+
+    function esc(s) {
+      return (s ?? '')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;');
+    }
+
+    function getStateTurns() {
+      const st = vscode.getState() || {};
+      return Array.isArray(st.turns) ? st.turns : [];
+    }
+    function setStateTurns(turns) {
+      vscode.setState({ turns });
+    }
+
+    function renderAll() {
+      chat.innerHTML = '';
+      const turns = getStateTurns();
+      for (const t of turns) appendBubble(t.role, t.text, t.ts, /*persist*/false);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function appendBubble(role, text, ts, persist = true, isErr = false) {
+      const row = document.createElement('div');
+      row.className = 'bubbleRow ' + (role === 'user' ? 'userRow' : 'assistantRow');
+
+      const b = document.createElement('div');
+      b.className = 'bubble ' + (role === 'user' ? 'userBubble' : 'assistantBubble') + (isErr ? ' err' : '');
+      b.innerHTML = esc(text);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const d = new Date(ts || Date.now());
+      meta.textContent = role === 'user' ? 'You • ' + d.toLocaleString() : 'Assistant • ' + d.toLocaleString();
+
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.appendChild(b);
+      wrap.appendChild(meta);
+
+      row.appendChild(wrap);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+
+      if (persist) {
+        const turns = getStateTurns();
+        turns.push({ role, text, ts: ts || Date.now() });
+        setStateTurns(turns);
+      }
+    }
+
+    function setBusy(on) {
+      busy = !!on;
+
+      if (busy) {
+        askBtn.disabled = true;
+        q.disabled = true;
+
+        thinkStep = 0;
+        askBtn.textContent = 'Thinking';
+        thinkTimer = setInterval(() => {
+          thinkStep = (thinkStep + 1) % 4;
+          askBtn.textContent = 'Thinking' + '.'.repeat(thinkStep);
+        }, 350);
+      } else {
+        if (thinkTimer) clearInterval(thinkTimer);
+        thinkTimer = null;
+
+        askBtn.disabled = false;
+        q.disabled = false;
+        askBtn.textContent = 'Ask';
+      }
+    }
+
+    document.getElementById('btnClear').addEventListener('click', () => {
+      setStateTurns([]);
+      renderAll();
+      vscode.postMessage({ type: 'clear' });
+    });
+
+    askBtn.addEventListener('click', () => {
+      if (busy) return;
+      const text = (q.value || '').trim();
+      if (!text) return;
+
+      appendBubble('user', text, Date.now(), true);
+      q.value = '';
+      setBusy(true);
+      status.textContent = 'Working…';
+      vscode.postMessage({ type: 'ask', text });
+    });
+
+    q.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        askBtn.click();
+      }
+    });
+
+    // initial render from persisted state
+    renderAll();
+
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'status') {
+        status.textContent = msg.text || '';
+        return;
+      }
+      if (msg.type === 'answer') {
+        status.textContent = '';
+        appendBubble('assistant', msg.answer || '(no output)', Date.now(), true);
+        setBusy(false);
+        return;
+      }
+      if (msg.type === 'error') {
+        status.textContent = '';
+        appendBubble('assistant', msg.text || 'Unknown error', Date.now(), true, true);
+        setBusy(false);
+        return;
+      }
+      if (msg.type === 'clear') {
+        status.textContent = '';
+        setStateTurns([]);
+        renderAll();
+        setBusy(false);
+        return;
+      }
+    });
+  </script>
+</body>
+</html>

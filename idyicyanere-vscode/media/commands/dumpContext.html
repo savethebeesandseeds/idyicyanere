@@ -1,0 +1,1314 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dump Context</title>
+  <style>
+    :root{
+      --pad: 10px;
+      --radius: 12px;
+      --border: var(--vscode-widget-border);
+      --fg: var(--vscode-foreground);
+      --muted: var(--vscode-descriptionForeground);
+      --bg: var(--vscode-editor-background);
+      --card: var(--vscode-sideBar-background);
+      --inputBg: var(--vscode-input-background);
+      --inputFg: var(--vscode-input-foreground);
+      --focus: var(--vscode-focusBorder);
+      --hover: var(--vscode-list-hoverBackground);
+      --active: var(--vscode-list-activeSelectionBackground);
+      --activeFg: var(--vscode-list-activeSelectionForeground);
+      --sel: var(--vscode-list-inactiveSelectionBackground);
+      --btnBg: var(--vscode-button-background);
+      --btnFg: var(--vscode-button-foreground);
+      --btnHover: var(--vscode-button-hoverBackground);
+      --warn: var(--vscode-editorWarning-foreground);
+      --err: var(--vscode-editorError-foreground);
+    }
+    html, body { height:100%; }
+    body{
+      margin:0;
+      font: 13px/1.3 var(--vscode-font-family);
+      color: var(--fg);
+      background: var(--bg);
+    }
+    .overlay{
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      box-sizing: border-box;
+    }
+    .card{
+      width: min(860px, calc(100vw - 28px));
+      height: min(620px, calc(100vh - 28px));
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+      display:flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .header{
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--border);
+      display:flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .titlewrap{ min-width: 0; }
+    .title{
+      font-size: 14px;
+      font-weight: 650;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hint{
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toolbar{
+      display:flex;
+      gap: 8px;
+      align-items: center;
+      flex: 0 0 auto;
+    }
+    .crumbs{
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      display:flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .breadcrumb{
+      display:flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+      align-items:center;
+    }
+    .crumb{
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .crumb:hover{ text-decoration: underline; }
+    .sep{ color: var(--muted); user-select:none; }
+    .search{
+      display:flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 260px;
+      max-width: 420px;
+      flex: 0 0 auto;
+    }
+    input[type="text"]{
+      width: 100%;
+      padding: 7px 9px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--inputBg);
+      color: var(--inputFg);
+      outline: none;
+    }
+    input[type="text"]:focus{ border-color: var(--focus); }
+    .content{
+      flex: 1 1 auto;
+      display:flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .list{
+      flex: 1 1 auto;
+      overflow: auto;
+      padding: 6px 0;
+      min-height: 0;
+    }
+    .row{
+      display:flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 12px;
+      cursor: default;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .row:hover{ background: var(--hover); }
+    .row.focused{
+      background: var(--sel);
+      outline: 1px solid var(--focus);
+      outline-offset: -1px;
+    }
+    .row.focused.selected{
+      background: var(--active);
+      color: var(--activeFg);
+    }
+    .row.selected{ background: var(--sel); }
+    .row.disabled{
+      opacity: 0.55;
+    }
+    .indent{ width: 0; }
+    .twisty{
+      width: 18px;
+      text-align: center;
+      color: var(--muted);
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .check{
+      width: 18px;
+      text-align:center;
+      color: var(--muted);
+      flex: 0 0 auto;
+    }
+    .icon{
+      width: 18px;
+      text-align:center;
+      flex: 0 0 auto;
+    }
+    .label{
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .label b{ font-weight: 650; }
+    .small{
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .footer{
+      border-top: 1px solid var(--border);
+      padding: 10px 14px;
+      display:flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .btn{
+      padding: 7px 11px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      user-select:none;
+    }
+    .btn:hover{ background: var(--hover); }
+    .btn.primary{
+      background: var(--btnBg);
+      color: var(--btnFg);
+      border-color: transparent;
+    }
+    .btn.primary:hover{ background: var(--btnHover); }
+    .btn:disabled{
+      opacity: 0.55;
+      cursor: default;
+    }
+    .status{
+      padding: 6px 14px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 18px;
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .pill{
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      user-select:none;
+    }
+    .pill.warn{ color: var(--warn); }
+    .pill.err{ color: var(--err); }
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <div class="card" role="dialog" aria-label="Dump Context Picker">
+      <div class="header">
+        <div class="titlewrap">
+          <div class="title">Dump Context</div>
+          <div class="hint">↑↓ move • ← collapse • → expand • Enter select • Shift+Enter dump • Esc cancel</div>
+        </div>
+        <div class="toolbar">
+          <span id="modePill" class="pill">Tree</span>
+        </div>
+      </div>
+
+      <div class="crumbs">
+        <div id="breadcrumb" class="breadcrumb"></div>
+        <div class="search">
+          <input id="filter" type="text" placeholder="Filter…" spellcheck="false" />
+          <button id="toggleSearch" class="btn" title="Search workspace (keeps selection)">Search</button>
+        </div>
+      </div>
+
+      <div class="content">
+        <div id="list" class="list" tabindex="0" role="listbox" aria-label="Files and folders"></div>
+      </div>
+
+      <div class="footer">
+        <div>
+          <div><span id="selCount">0</span> selected</div>
+          <div id="selPreview" class="small"></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <label class="small" style="display:flex; gap:6px; align-items:center; margin-right:6px; user-select:none;">
+            <input id="persistChk" type="checkbox" />
+            Persist
+          </label>
+          <button id="clearBtn" class="btn" title="Clear selection">Clear</button>
+          <button id="copyBtn" class="btn" title="Copy selected list">Copy</button>
+          <button id="dumpBtn" class="btn primary" title="Dump (Shift+Enter)">Dump</button>
+          <button id="cancelBtn" class="btn" title="Cancel (Esc)">Cancel</button>
+        </div>
+      </div>
+
+      <div class="status">
+        <div id="statusText"></div>
+        <div id="busyText" class="small"></div>
+      </div>
+    </div>
+  </div>
+
+  <script nonce="__NONCE__">
+  (function(){
+    const vscode = acquireVsCodeApi();
+
+    const elList = document.getElementById("list");
+    const elFilter = document.getElementById("filter");
+    const elBreadcrumb = document.getElementById("breadcrumb");
+    const elSelCount = document.getElementById("selCount");
+    const elSelPreview = document.getElementById("selPreview");
+    const elStatus = document.getElementById("statusText");
+    const elBusy = document.getElementById("busyText");
+    const elDump = document.getElementById("dumpBtn");
+    const elCancel = document.getElementById("cancelBtn");
+    const elClear = document.getElementById("clearBtn");
+    const elCopy = document.getElementById("copyBtn");
+    const elToggleSearch = document.getElementById("toggleSearch");
+    const elModePill = document.getElementById("modePill");
+    const elPersist = document.getElementById("persistChk");
+
+    function nowMs(){ return Date.now(); }
+    function safeStr(x){ return (x === null || x === undefined) ? "" : String(x); }
+    function escHtml(s){
+      return safeStr(s)
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;")
+        .replace(/'/g,"&#39;");
+    }
+
+    function normSlashes(s){
+      var out = safeStr(s).split("\\\\").join("/");
+      while (out.indexOf("//") >= 0) out = out.split("//").join("/");
+      while (out.startsWith("/")) out = out.slice(1);
+      while (out.endsWith("/")) out = out.slice(0, -1);
+      return out;
+    }
+
+    // Canonicalize to "root/rel" without accidental "root/root/..." (multi-root can do that)
+    function normalizeDisplayRel(root, relLike){
+      const r0 = normSlashes(root);
+      const p0 = normSlashes(relLike);
+      if(!r0) return p0;
+      if(!p0) return r0;
+
+      const parts = p0.split("/").filter(Boolean);
+      // If already starts with root, strip it
+      if(parts.length && parts[0] === r0){
+        const rest = parts.slice(1).join("/");
+        return rest ? (r0 + "/" + rest) : r0;
+      }
+      // If starts with root twice (root/root/...), strip one
+      if(parts.length >= 2 && parts[0] === r0 && parts[1] === r0){
+        const rest = parts.slice(2).join("/");
+        return rest ? (r0 + "/" + rest) : r0;
+      }
+      // Otherwise treat relLike as relative-to-root
+      return r0 + "/" + p0;
+    }
+
+    const S = {
+      nodes: new Map(),         // uri -> node
+      children: new Map(),      // parentUri -> childUris[]
+      parent: new Map(),        // uri -> parentUri
+      depth: new Map(),         // uri -> depth
+      root: new Map(),          // uri -> rootName
+      expanded: new Set(),      // dir uris
+      loaded: new Set(),        // dir uris with children loaded
+      pending: new Set(),       // dir uris with request in-flight
+      visible: [],              // list of uris currently rendered
+      focusIdx: 0,
+      filter: "",
+      mode: "tree",             // "tree" | "search"
+      searchResults: [],        // uris (flat list)
+      lastSearchAt: 0,
+      busy: false,
+      selected: new Set(),           // uri set (SOURCE OF TRUTH)
+      selectedRelByUri: new Map(),   // uri -> displayRel (best-effort, never stale)
+      selectedRels: [],              // derived (deduped) rel list for display
+      selectedPrefixes: new Set(),   // derived from selectedRels
+      selectionDirty: true,
+      persistEnabled: false,
+      renderHold: 0,         // ---- Render batching (prevents dozens of full re-renders) ----
+      renderQueued: false,   // ---- Render batching (prevents dozens of full re-renders) ----
+      renderWanted: false,    // ---- Render batching (prevents dozens of full re-renders) ----
+      childWaiters: new Map() // dirUri -> array of resolve fns
+    };
+
+
+    let saveTimer = 0;
+
+    function postSaveStateSoon(){
+      if(saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(()=>{
+        const enabled = !!S.persistEnabled;
+        const selectedUris = Array.from(S.selected.values());
+        vscode.postMessage({ type: "saveState", enabled, selectedUris });
+      }, 250);
+    }
+
+    if (elPersist) {
+      elPersist.addEventListener("change", ()=>{
+        S.persistEnabled = !!elPersist.checked;
+        postSaveStateSoon();
+        status(S.persistEnabled ? "Persistence enabled." : "Persistence disabled.");
+      });
+    }
+
+    function setBusy(b, text){
+      S.busy = !!b;
+      elBusy.textContent = b ? (safeStr(text) || "Working…") : "";
+      elDump.disabled = S.busy || S.selected.size === 0;
+      elToggleSearch.disabled = S.busy;
+      elClear.disabled = S.busy || S.selected.size === 0;
+      elCopy.disabled = S.busy || S.selected.size === 0;
+    }
+
+    function status(text){
+      elStatus.textContent = safeStr(text);
+    }
+
+    function computeDisplayRel(uri){
+      const n = S.nodes.get(uri);
+      if(!n) return "";
+      const root = safeStr(S.root.get(uri) || n.root || "");
+      const rel = safeStr(n.rel || "");
+      // Root dir should display as just "root"
+      if(n.kind === "dir" && (rel === root || n.name === root || !rel)){
+        return root || (n.name || uri);
+      }
+      return normalizeDisplayRel(root || n.name || "", rel || n.name || "");
+    }
+
+    function addNode(node, parentUri, depth, rootName){
+      if(!node || !node.uri) return;
+      const uri = node.uri;
+      S.nodes.set(uri, node);
+      if(parentUri) S.parent.set(uri, parentUri);
+      if(typeof depth === "number") S.depth.set(uri, depth);
+      if(rootName) S.root.set(uri, rootName);
+      // If this URI is selected (persisted), and we just learned its node,
+      // capture its display rel for correct footer/breadcrumb display.
+      if(S.selected.has(uri) && !S.selectedRelByUri.has(uri)){
+        const rel = computeDisplayRel(uri);
+        if(rel) {
+          S.selectedRelByUri.set(uri, normSlashes(rel));
+          markSelectionDirty();
+        }
+      }
+    }
+
+    function markSelectionDirty(){
+      S.selectionDirty = true;
+    }
+
+    function syncSelectionCaches(){
+      if(!S.selectionDirty) return;
+
+      // Try to fill any missing rels from loaded nodes (e.g. persisted items later loaded)
+      for(const uri of S.selected.values()){
+        if(!S.selectedRelByUri.has(uri)){
+          const rel = computeDisplayRel(uri);
+          if(rel) S.selectedRelByUri.set(uri, normSlashes(rel));
+        }
+      }
+
+      const rels = [];
+      for(const u of S.selected.values()){
+        const r = S.selectedRelByUri.get(u) || computeDisplayRel(u);
+        if(r) rels.push(normSlashes(r));
+      }
+      rels.sort();
+      const txt = rels.join(" ");
+
+      // Dedup for display (URIs are unique anyway; this is just defensive)
+      S.selectedRels = Array.from(new Set(rels.filter(Boolean)));
+
+      const pref = new Set();
+      for(const r of S.selectedRels){
+        const parts = r.split("/").filter(Boolean);
+        for(let i = 1; i <= parts.length - 1; i++){
+          pref.add(parts.slice(0,i).join("/"));
+        }
+      }
+      S.selectedPrefixes = pref;
+
+      S.selectionDirty = false;
+    }
+
+    function setChildren(parentUri, children){
+      const p = S.nodes.get(parentUri);
+      const pDepth = S.depth.get(parentUri) || 0;
+      const rootName = S.root.get(parentUri) || (p ? (p.root || p.name) : "");
+      const childUris = [];
+
+      for(const ch of (children || [])){
+        if(!ch || !ch.uri) continue;
+        addNode(ch, parentUri, pDepth + 1, rootName);
+        childUris.push(ch.uri);
+      }
+
+      S.children.set(parentUri, childUris);
+      S.loaded.add(parentUri);
+      S.pending.delete(parentUri);
+
+      // Resolve any waiters for this dir
+      const ws = S.childWaiters.get(parentUri);
+      if(ws && ws.length){
+        S.childWaiters.delete(parentUri);
+        for(const fn of ws){
+          try{ fn(true); }catch(_e){}
+        }
+      }
+    }
+
+    function rootsArr(){
+      const out = [];
+      for(const [uri, n] of S.nodes.entries()){
+        if(S.depth.get(uri) === 0) out.push(uri);
+      }
+      out.sort((a,b)=> (safeStr(S.nodes.get(a)?.name)).localeCompare(safeStr(S.nodes.get(b)?.name)));
+      return out;
+    }
+
+    function baseVisibleTree(){
+      const out = [];
+      const roots = rootsArr();
+      const stack = [...roots].reverse();
+      while(stack.length){
+        const uri = stack.pop();
+        out.push(uri);
+        const n = S.nodes.get(uri);
+        if(n && n.kind === "dir" && S.expanded.has(uri)){
+          const kids = S.children.get(uri) || [];
+          for(let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
+        }
+      }
+      return out;
+    }
+
+    function computeVisible(){
+      if(S.mode === "search"){
+        const q = (S.filter || "").trim().toLowerCase();
+        if(!q) return S.searchResults.slice(0);
+        return S.searchResults.filter((u)=>{
+          const n = S.nodes.get(u);
+          const p = computeDisplayRel(u).toLowerCase();
+          const rel = safeStr(n?.rel||"").toLowerCase();
+          const nm = safeStr(n?.name||"").toLowerCase();
+          return p.includes(q) || rel.includes(q) || nm.includes(q);
+        });
+      }
+
+      const base = baseVisibleTree();
+      const q = (S.filter || "").trim().toLowerCase();
+      if(!q) return base;
+
+      // Soft filter that keeps tree context: include matches + their visible ancestors
+      const include = new Set();
+      for(const u of base){
+        const path = computeDisplayRel(u).toLowerCase();
+        if(path.includes(q)){
+          let cur = u;
+          while(cur){
+            include.add(cur);
+            cur = S.parent.get(cur);
+          }
+        }
+      }
+      return base.filter((u)=> include.has(u));
+    }
+
+    function ensureFocusValid(){
+      if(S.visible.length === 0){
+        S.focusIdx = 0;
+        return;
+      }
+      if(S.focusIdx < 0) S.focusIdx = 0;
+      if(S.focusIdx >= S.visible.length) S.focusIdx = S.visible.length - 1;
+    }
+
+    function focusedUri(){
+      return S.visible[S.focusIdx] || "";
+    }
+
+    function checkboxMark(uri){
+      const n = S.nodes.get(uri);
+      if(!n) return "☐";
+
+      // File: checked iff explicitly selected
+      if(n.kind !== "dir"){
+        return S.selected.has(uri) ? "☑" : "☐";
+      }
+
+      // Dir: checked only if explicitly selected (rare/optional)
+      if(S.selected.has(uri)) return "☑";
+
+      // Otherwise partial if any selected file lives under this dir
+      const drel = normSlashes(computeDisplayRel(uri));
+      if(drel && S.selectedPrefixes && S.selectedPrefixes.has(drel)) return "⊡";
+
+      return "☐";
+    }
+
+    function twistyMark(uri){
+      const n = S.nodes.get(uri);
+      if(!n || n.kind !== "dir") return "";
+      return S.expanded.has(uri) ? "▾" : "▸";
+    }
+
+    function iconMark(uri){
+      const n = S.nodes.get(uri);
+      if(!n) return "•";
+      return n.kind === "dir" ? "📁" : "📄";
+    }
+
+    function renderBreadcrumb(){
+      const u = focusedUri();
+      const display = computeDisplayRel(u);
+      if(!display){
+        elBreadcrumb.innerHTML = '<span class="small">—</span>';
+        return;
+      }
+      const parts = display.split("/").filter(Boolean);
+      let html = "";
+      for(let i=0;i<parts.length;i++){
+        const seg = parts[i];
+        const pref = parts.slice(0,i+1).join("/");
+        html += '<span class="crumb" data-rel="'+escHtml(pref)+'">'+escHtml(seg)+'</span>';
+        if(i < parts.length-1) html += '<span class="sep">/</span>';
+      }
+      elBreadcrumb.innerHTML = html;
+    }
+
+    function renderSelectionFooter(){
+      syncSelectionCaches();
+
+      const totalSelected = S.selected.size;
+      elSelCount.textContent = String(totalSelected);
+
+      elDump.disabled  = S.busy || totalSelected === 0;
+      elClear.disabled = S.busy || totalSelected === 0;
+      elCopy.disabled  = S.busy || totalSelected === 0;
+
+      if(totalSelected === 0){
+        elSelPreview.textContent = "";
+        return;
+      }
+
+      // Sorted display rels we *do* know
+      const rels = (S.selectedRels || []).slice(0).sort();
+      const unresolved = Math.max(0, totalSelected - rels.length);
+
+      // best-effort file/dir breakdown
+      let fileCount = 0, dirCount = 0;
+      for(const u of S.selected.values()){
+        const n = S.nodes.get(u);
+        if(n && n.kind === "dir") dirCount++;
+        else fileCount++;
+      }
+
+      const prev = rels.slice(0, 3);
+      const moreKnown = rels.length - prev.length;
+
+      const bits = [];
+      if(prev.length) bits.push(prev.join("  •  "));
+      if(moreKnown > 0) bits.push("+" + moreKnown + " more");
+      if(unresolved > 0) bits.push(unresolved + " unresolved");
+
+      const breakdown = (dirCount > 0)
+        ? (fileCount + " file(s), " + dirCount + " folder(s)")
+        : (fileCount + " file(s)");
+
+      elSelPreview.textContent = bits.join("  •  ") + "  •  " + breakdown;
+    }
+
+    function requestRender(){
+      // If we are in a batch (folder select), defer rendering until batch ends
+      if(S.renderHold > 0){
+        S.renderWanted = true;
+        return;
+      }
+      if(S.renderQueued) return;
+      S.renderQueued = true;
+
+      // requestAnimationFrame is perfect for batching UI work
+      requestAnimationFrame(function(){
+        S.renderQueued = false;
+        render();
+      });
+    }
+
+    function beginBatch(){
+      S.renderHold++;
+    }
+
+    function endBatch(){
+      S.renderHold = Math.max(0, S.renderHold - 1);
+      if(S.renderHold === 0 && S.renderWanted){
+        S.renderWanted = false;
+        requestRender();
+      }
+    }
+
+    function waitChildrenLoaded(dirUri, timeoutMs){
+      if(S.loaded.has(dirUri)) return Promise.resolve(true);
+
+      return new Promise(function(resolve){
+        let done = false;
+
+        function finish(ok){
+          if(done) return;
+          done = true;
+          resolve(!!ok);
+        }
+
+        const arr = S.childWaiters.get(dirUri) || [];
+        arr.push(finish);
+        S.childWaiters.set(dirUri, arr);
+
+        if(timeoutMs && timeoutMs > 0){
+          setTimeout(function(){ finish(false); }, timeoutMs);
+        }
+      });
+    }
+
+    function render(){
+      syncSelectionCaches();
+      S.visible = computeVisible();
+      ensureFocusValid();
+
+      const rows = [];
+      for(let i=0;i<S.visible.length;i++){
+        const uri = S.visible[i];
+        const n = S.nodes.get(uri);
+        if(!n) continue;
+
+        const d = S.depth.get(uri) || 0;
+        const indentPx = 10 + d * 16;
+
+        const isFocused = (i === S.focusIdx);
+        const isSel = S.selected.has(uri);
+        const disabled = !!n.excluded;
+
+        const display = computeDisplayRel(uri);
+        const parts = display.split("/").filter(Boolean);
+        const last = parts.length ? parts[parts.length-1] : display;
+        const prefix = parts.slice(0, -1).join("/");
+
+        const label = prefix
+          ? (escHtml(prefix) + '/<b>' + escHtml(last) + '</b>')
+          : ('<b>' + escHtml(last) + '</b>');
+
+        const cls = [
+          "row",
+          isFocused ? "focused" : "",
+          isSel ? "selected" : "",
+          disabled ? "disabled" : ""
+        ].join(" ").trim();
+
+        rows.push(
+          '<div class="'+cls+'" data-uri="'+escHtml(uri)+'" role="option" aria-selected="'+(isSel?"true":"false")+'">' +
+            '<div class="indent" style="width:'+indentPx+'px"></div>' +
+            '<div class="twisty" data-twisty="1">'+escHtml(twistyMark(uri))+'</div>' +
+            '<div class="check">'+escHtml(checkboxMark(uri))+'</div>' +
+            '<div class="icon">'+escHtml(iconMark(uri))+'</div>' +
+            '<div class="label">'+label+'</div>' +
+          '</div>'
+        );
+      }
+
+      elList.innerHTML = rows.join("");
+      renderBreadcrumb();
+      renderSelectionFooter();
+
+      const u = focusedUri();
+      if(u){
+        const row = elList.querySelector('[data-uri="'+CSS.escape(u)+'"]');
+        if(row && row.scrollIntoView){
+          row.scrollIntoView({ block: "nearest" });
+        }
+      }
+    }
+
+    async function requestChildren(parentUri){
+      if(S.pending.has(parentUri) || S.loaded.has(parentUri)) return;
+      const n = S.nodes.get(parentUri);
+      if(!n || n.kind !== "dir") return;
+      S.pending.add(parentUri);
+      vscode.postMessage({ type: "children", parentUri: parentUri });
+    }
+
+    function toggleExpanded(dirUri, wantExpanded){
+      const n = S.nodes.get(dirUri);
+      if(!n || n.kind !== "dir") return;
+
+      const expanded = S.expanded.has(dirUri);
+      const next = (wantExpanded === undefined) ? !expanded : !!wantExpanded;
+
+      if(next){
+        S.expanded.add(dirUri);
+        requestChildren(dirUri);
+      }else{
+        S.expanded.delete(dirUri);
+      }
+      render();
+    }
+
+    async function selectToggle(uri){
+      const n = S.nodes.get(uri);
+      if(!n) return;
+
+      if(n.excluded){
+        status("Excluded by config.");
+        return;
+      }
+
+      // Folder: toggle all descendant files (never select folder URI itself)
+      if(n.kind === "dir"){
+        if(S.busy) return;
+        beginBatch();
+        setBusy(true, "Selecting folder…");
+
+        try{
+          const files = await collectDescendantFileUris(uri);
+
+          if(files.length === 0){
+            status("Folder contains no selectable files.");
+            markSelectionDirty();
+            requestRender();
+            return;
+          }
+
+          const allSelected = files.every(function(f){ return S.selected.has(f); });
+
+          if(allSelected){
+            for(const f of files){
+              S.selected.delete(f);
+              S.selectedRelByUri.delete(f);
+            }
+          }else{
+            for(const f of files){
+              S.selected.add(f);
+              const rel = computeDisplayRel(f);
+              if(rel) S.selectedRelByUri.set(f, normSlashes(rel));
+            }
+          }
+
+          markSelectionDirty();
+          requestRender();
+          postSaveStateSoon();
+        } finally {
+          setBusy(false, "");
+          endBatch();
+        }
+        return;
+      }
+
+      // File: toggle single
+      const wantSelected = !S.selected.has(uri);
+      if(wantSelected){
+        S.selected.add(uri);
+        const rel = computeDisplayRel(uri);
+        if(rel) S.selectedRelByUri.set(uri, normSlashes(rel));
+      }else{
+        S.selected.delete(uri);
+        S.selectedRelByUri.delete(uri);
+      }
+
+      markSelectionDirty();
+      render();
+      postSaveStateSoon();
+    }
+
+    async function revealRel(rel){
+      const want = safeStr(rel).trim();
+      if(!want) return;
+
+      // Resolve prefixes: root/..., then expand step by step using children lists
+      const parts = want.replace(/\\\\/g,"/").split("/").filter(Boolean);
+      if(parts.length === 0) return;
+
+      let curRel = parts[0];
+      let curUri = await resolveRelAsync(curRel);
+      if(!curUri) return;
+
+      // Expand/focus root
+      S.focusIdx = Math.max(0, S.visible.indexOf(curUri));
+
+      for(let i=1;i<parts.length;i++){
+        curRel = parts.slice(0, i+1).join("/");
+        const nextUri = await resolveRelAsync(curRel);
+        if(!nextUri) break;
+
+        // Ensure current is expanded + loaded, then move to next
+        toggleExpanded(curUri, true);
+        if(!S.loaded.has(curUri)){
+          await waitLoaded(curUri, 2500);
+        }
+        const kids = S.children.get(curUri) || [];
+        if(kids.indexOf(nextUri) < 0){
+          // not in loaded children; stop
+          break;
+        }
+        curUri = nextUri;
+      }
+
+      // Focus final
+      render();
+      const idx = S.visible.indexOf(curUri);
+      if(idx >= 0){
+        S.focusIdx = idx;
+        render();
+      }
+    }
+
+    function waitLoaded(dirUri, ms){
+      return new Promise((resolve)=>{
+        const start = nowMs();
+        const t = setInterval(()=>{
+          if(S.loaded.has(dirUri) || (nowMs() - start) > ms){
+            clearInterval(t);
+            resolve(true);
+          }
+        }, 25);
+      });
+    }
+
+    async function ensureChildrenLoaded(dirUri){
+      if(S.loaded.has(dirUri)) return true;
+
+      if(!S.pending.has(dirUri)){
+        requestChildren(dirUri);
+      }
+      return await waitChildrenLoaded(dirUri, 3000);
+    }
+
+    async function collectDescendantFileUris(dirUri){
+      const out = [];
+      const seenDirs = new Set();
+
+      async function walk(u){
+        if(seenDirs.has(u)) return;
+        seenDirs.add(u);
+
+        const ok = await ensureChildrenLoaded(u);
+        if(!ok) return;
+
+        const kids = S.children.get(u) || [];
+        for(const k of kids){
+          const n = S.nodes.get(k);
+          if(!n) continue;
+
+          if(n.excluded) continue;
+
+          if(n.kind === "dir"){
+            await walk(k);
+          }else{
+            out.push(k);
+          }
+        }
+      }
+
+      await walk(dirUri);
+      return out;
+    }
+
+    function resolveRelAsync(rel){
+      return new Promise((resolve)=>{
+        const handler = (ev)=>{
+          const m = ev.data || {};
+          if(m.type === "resolvedRel" && m.rel === rel){
+            window.removeEventListener("message", handler);
+            resolve(m.uri || "");
+          }
+        };
+        window.addEventListener("message", handler);
+        vscode.postMessage({ type: "resolveRel", rel: rel });
+      });
+    }
+
+    function setMode(mode){
+      S.mode = mode;
+      elModePill.textContent = mode === "search" ? "Search" : "Tree";
+      elToggleSearch.textContent = mode === "search" ? "Tree" : "Search";
+      if(mode === "tree"){
+        status("Tree mode.");
+      }else{
+        status("Search mode (selection preserved).");
+      }
+      render();
+    }
+
+    function runSearch(){
+      const q = (S.filter || "").trim();
+      if(!q){
+        status("Type a query to search.");
+        return;
+      }
+      S.lastSearchAt = nowMs();
+      vscode.postMessage({ type: "search", query: q, limit: 300 });
+      status("Searching workspace…");
+    }
+
+    function doDump(){
+      if(S.busy) return;
+      const uris = Array.from(S.selected.values());
+      if(!uris.length){
+        status("Nothing selected.");
+        return;
+      }
+      syncSelectionCaches();
+      const rels = (S.selectedRels || []).slice(0).filter(Boolean).sort();
+      vscode.postMessage({ type: "dump", selectedUris: uris, selectedRels: rels });
+    }
+
+    function onKey(e){
+      const t = e.target;
+      const inInput = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA");
+
+      if(e.key === "Escape"){
+        if(inInput && safeStr(elFilter.value).trim()){
+          elFilter.value = "";
+          S.filter = "";
+          status("Filter cleared.");
+          render();
+          e.preventDefault();
+          return;
+        }
+        vscode.postMessage({ type: "cancel" });
+        e.preventDefault();
+        return;
+      }
+
+      // Convenience: Ctrl/Cmd+F focuses filter
+      if((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")){
+        elFilter.focus();
+        elFilter.select();
+        e.preventDefault();
+        return;
+      }
+
+      if(S.busy) return;
+
+      // If typing in filter, allow Down to jump to list
+      if(inInput){
+        if(e.key === "ArrowDown" && S.visible.length){
+          elList.focus();
+          e.preventDefault();
+          return;
+        }
+        // Enter in filter: in Search mode, triggers search; in Tree mode, keep as-is
+        if(e.key === "Enter" && S.mode === "search"){
+          runSearch();
+          e.preventDefault();
+          return;
+        }
+        return;
+      }
+
+      if(e.key === "Enter"){
+        if(e.shiftKey){
+          doDump();
+        }else{
+          const u = focusedUri();
+          if(u) void selectToggle(u);
+        }
+        e.preventDefault();
+        return;
+      }
+
+      if(e.key === " "){
+        const u = focusedUri();
+        if(u) void selectToggle(u);
+        e.preventDefault();
+        return;
+      }
+
+      if(e.key === "ArrowUp"){
+        S.focusIdx = Math.max(0, S.focusIdx - 1);
+        renderBreadcrumb();
+        render();
+        e.preventDefault();
+        return;
+      }
+
+      if(e.key === "ArrowDown"){
+        S.focusIdx = Math.min(S.visible.length - 1, S.focusIdx + 1);
+        renderBreadcrumb();
+        render();
+        e.preventDefault();
+        return;
+      }
+
+      if(e.key === "ArrowRight"){
+        const u = focusedUri();
+        const n = S.nodes.get(u);
+        if(n && n.kind === "dir"){
+          if(!S.expanded.has(u)){
+            toggleExpanded(u, true);
+          }else{
+            const kids = S.children.get(u) || [];
+            if(kids.length){
+              const idx = S.visible.indexOf(kids[0]);
+              if(idx >= 0){
+                S.focusIdx = idx;
+                render();
+              }
+            }
+          }
+        }
+        e.preventDefault();
+        return;
+      }
+
+      if(e.key === "ArrowLeft"){
+        const u = focusedUri();
+        const n = S.nodes.get(u);
+        if(n && n.kind === "dir" && S.expanded.has(u)){
+          toggleExpanded(u, false);
+        }else{
+          const p = S.parent.get(u);
+          if(p){
+            const idx = S.visible.indexOf(p);
+            if(idx >= 0){
+              S.focusIdx = idx;
+              render();
+            }
+          }
+        }
+        e.preventDefault();
+        return;
+      }
+    }
+
+    elList.addEventListener("click", (e)=>{
+      const t = e.target;
+      const row = t && t.closest ? t.closest(".row") : null;
+      if(!row) return;
+
+      const uri = row.getAttribute("data-uri") || "";
+      if(!uri) return;
+
+      const idx = S.visible.indexOf(uri);
+      if(idx >= 0) S.focusIdx = idx;
+
+      const n = S.nodes.get(uri);
+
+      // If user clicked the twisty, only expand/collapse.
+      if(t && t.getAttribute && t.getAttribute("data-twisty")){
+        e.preventDefault();
+        e.stopPropagation();
+        toggleExpanded(uri);
+        return;
+      }
+
+      // If user clicked the checkbox glyph, only toggle selection.
+      if(t && t.classList && t.classList.contains("check")){
+        e.preventDefault();
+        e.stopPropagation();
+        void selectToggle(uri);
+        return;
+      }
+
+      // Clicking anywhere else on the row:
+      // - folder => toggle expand/collapse
+      // - file   => toggle selection
+      if(n && n.kind === "dir"){
+        toggleExpanded(uri);
+        return;
+      }
+
+      void selectToggle(uri);
+    });
+
+    elBreadcrumb.addEventListener("click", (e)=>{
+      const t = e.target;
+      const rel = t && t.getAttribute ? t.getAttribute("data-rel") : "";
+      if(rel) revealRel(rel);
+    });
+
+    elFilter.addEventListener("input", ()=>{
+      S.filter = safeStr(elFilter.value);
+      render();
+    });
+
+    elToggleSearch.addEventListener("click", ()=>{
+      if(S.mode === "tree"){
+        setMode("search");
+        runSearch();
+      }else{
+        setMode("tree");
+      }
+    });
+
+    elDump.addEventListener("click", ()=> doDump());
+    elCancel.addEventListener("click", ()=> vscode.postMessage({ type: "cancel" }));
+    elClear.addEventListener("click", ()=>{
+      S.selected.clear();
+      S.selectedRelByUri.clear();
+      markSelectionDirty();
+      render();
+      status("Selection cleared.");
+      postSaveStateSoon();
+    });
+
+    elCopy.addEventListener("click", async ()=>{
+      try{
+        const rels = [];
+        for(const u of S.selected.values()){
+          const r = S.selectedRelByUri.get(u) || computeDisplayRel(u);
+          if(r) rels.push(normSlashes(r));
+        }
+        rels.sort();
+        const txt = rels.join(" ");
+        if(navigator && navigator.clipboard && navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(txt);
+          status("Copied selected list.");
+        }else{
+          status("Clipboard not available.");
+        }
+      }catch(_err){
+        status("Copy failed.");
+      }
+    });
+
+    window.addEventListener("message", (ev)=>{
+      const msg = ev.data || {};
+      try{
+        if(msg.type === "busy"){
+          setBusy(!!msg.busy, msg.text || "");
+          return;
+        }
+        if(msg.type === "status"){
+          status(msg.text || "");
+          return;
+        }
+        if(msg.type === "roots"){
+          S.nodes.clear();
+          S.children.clear();
+          S.parent.clear();
+          S.depth.clear();
+          S.root.clear();
+          S.expanded.clear();
+          S.loaded.clear();
+          S.pending.clear();
+          S.searchResults = [];
+
+          S.selected.clear();
+          S.selectedRelByUri.clear();  // <-- ensure cleared here
+
+          const roots = msg.roots || [];
+          for(const r of roots){
+            addNode(r, "", 0, r.root || r.name);
+          }
+
+          const p = msg.persist || { enabled: false, selectedUris: [], selectedRels: [] };
+          S.persistEnabled = !!p.enabled;
+          if(elPersist) elPersist.checked = S.persistEnabled;
+
+          for(const u of (p.selectedUris || [])){
+            if(u) S.selected.add(String(u));
+          }
+
+          // hydrate uri -> rel by index (rels may be empty strings; that's OK)
+          const uList = p.selectedUris || [];
+          const rList = p.selectedRels || [];
+          for(let i = 0; i < uList.length; i++){
+            const uri = safeStr(uList[i]);
+            const rel = normSlashes(safeStr(rList[i]));
+            if(uri && rel) S.selectedRelByUri.set(uri, rel);
+          }
+
+          markSelectionDirty();
+          S.visible = computeVisible();
+          S.focusIdx = 0;
+          render();
+          status("Ready.");
+          return;
+        }
+        if(msg.type === "children"){
+          const p = msg.parentUri || "";
+          const kids = msg.children || [];
+          setChildren(p, kids);
+          requestRender(); // batched
+          return;
+        }
+        if(msg.type === "searchResults"){
+          const res = msg.results || [];
+          const uris = [];
+          for(const r of res){
+            addNode(r, "", 0, r.root || r.name);
+            uris.push(r.uri);
+          }
+          S.searchResults = uris;
+          render();
+          status(res.length ? ("Found " + res.length + " result(s).") : "No results.");
+          return;
+        }
+        if(msg.type === "resolvedRel"){
+          return;
+        }
+      }catch(err){
+        vscode.postMessage({
+          type: "clientError",
+          text: "picker webview render error",
+          stack: String((err && err.stack) || err)
+        });
+      }
+    });
+
+    document.addEventListener("keydown", onKey);
+
+    // Boot
+    setBusy(true, "Loading…");
+    status("Loading roots…");
+    vscode.postMessage({ type: "ready" });
+    elList.focus();
+  })();
+  </script>
+</body>
+</html>

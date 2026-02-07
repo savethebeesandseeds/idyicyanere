@@ -1,0 +1,346 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: var(--vscode-font-family); padding: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: 0;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    input {
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+      padding: 6px 8px;
+      border-radius: 6px;
+      min-width: 240px;
+    }
+    .mono { font-family: var(--vscode-editor-font-family); font-size: 12px; }
+    .box { margin-top: 10px; border: 1px solid var(--vscode-editorWidget-border); border-radius: 8px; padding: 10px; }
+
+    .ok { color: var(--vscode-testing-iconPassed); }
+    /* avoid red: use a neutral warning-ish foreground */
+    .warn { color: var(--vscode-descriptionForeground); }
+
+    .tree { line-height: 1.45; }
+    .node { margin: 2px 0; }
+    .k { color: var(--vscode-symbolIcon-variableForeground); }
+    .t { color: var(--vscode-descriptionForeground); margin-left: 6px; }
+    .v { color: var(--vscode-foreground); }
+    .badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      color: var(--vscode-descriptionForeground);
+      margin-left: 6px;
+      font-size: 11px;
+    }
+    .smallbtn {
+      background: transparent;
+      border: 1px solid var(--vscode-editorWidget-border);
+      color: var(--vscode-foreground);
+      padding: 0 6px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .smallbtn:hover { background: var(--vscode-list-hoverBackground); }
+
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    summary { display: inline-flex; align-items: center; gap: 6px; }
+    summary:before {
+      content: "▸";
+      display: inline-block;
+      width: 14px;
+      color: var(--vscode-descriptionForeground);
+      transform: translateY(-1px);
+    }
+    details[open] > summary:before { content: "▾"; }
+  </style>
+</head>
+<body>
+  <div class="row" style="justify-content: space-between;">
+    <strong>Config</strong>
+    <button class="secondary" id="btnRefresh">Refresh</button>
+  </div>
+
+  <div class="box">
+    <div class="row">
+      <button id="btnSetKey">Set API Key</button>
+      <button class="secondary" id="btnOpen">Open config.json</button>
+      <button class="secondary" id="btnNormalize">Normalize config.json</button>
+      <button class="secondary" id="btnRefreshAll">Refresh All</button>
+      <button class="secondary" id="btnLogs">Show Logs</button>
+    </div>
+
+    <div class="mono" style="margin-top: 10px;">
+      <div>config: <span id="cfgPath"></span></div>
+      <div>api key: <span id="keyStatus"></span></div>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <strong>Effective config</strong>
+      <div class="row">
+        <input id="cfgFilter" placeholder="Filter (e.g. api, embed, path)..." />
+        <button class="secondary" id="btnCopyCfg">Copy JSON</button>
+        <button class="secondary" id="btnExpandAll">Expand</button>
+        <button class="secondary" id="btnCollapseAll">Collapse</button>
+      </div>
+    </div>
+    <div id="cfgTree" class="tree mono" style="margin-top: 10px;"></div>
+  </div>
+
+  <script nonce="__NONCE__">
+    const vscode = acquireVsCodeApi();
+
+    window.addEventListener('error', (e) => {
+      vscode.postMessage({
+        type: 'clientError',
+        text: e.message || 'Webview error',
+        stack: e.error?.stack
+      });
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const reason = e.reason?.message ? e.reason.message : String(e.reason);
+      vscode.postMessage({
+        type: 'clientError',
+        text: reason || 'Unhandled rejection',
+        stack: e.reason?.stack
+      });
+    });
+
+    const cfgPathEl = document.getElementById('cfgPath');
+    const keyStatusEl = document.getElementById('keyStatus');
+
+    const treeEl = document.getElementById('cfgTree');
+    const filterEl = document.getElementById('cfgFilter');
+
+    let lastConfigRaw = null;
+    let lastConfigMasked = null;
+
+    document.getElementById('btnRefresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+    document.getElementById('btnOpen').addEventListener('click', () => vscode.postMessage({ type: 'openConfig' }));
+    document.getElementById('btnSetKey').addEventListener('click', () => vscode.postMessage({ type: 'setApiKey' }));
+    document.getElementById('btnLogs').addEventListener('click', () => vscode.postMessage({ type: 'showLogs' }));
+    document.getElementById('btnRefreshAll').addEventListener('click', () => vscode.postMessage({ type: 'refreshAll' }));
+    document.getElementById('btnNormalize').addEventListener('click', () => vscode.postMessage({ type: 'normalizeConfig' }));
+
+    document.getElementById('btnCopyCfg').addEventListener('click', async () => {
+      try {
+        const text = JSON.stringify(lastConfigMasked ?? {}, null, 2);
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
+        vscode.postMessage({ type: 'clientError', text: 'Clipboard copy failed', stack: String(e) });
+      }
+    });
+
+    document.getElementById('btnExpandAll').addEventListener('click', () => {
+      treeEl.querySelectorAll('details').forEach(d => d.open = true);
+    });
+    document.getElementById('btnCollapseAll').addEventListener('click', () => {
+      treeEl.querySelectorAll('details').forEach(d => d.open = false);
+    });
+
+    filterEl.addEventListener('input', () => {
+      renderTree(lastConfigMasked, filterEl.value.trim().toLowerCase());
+    });
+
+    function isObject(x) { return x && typeof x === 'object' && !Array.isArray(x); }
+
+    function typeLabel(x) {
+      if (x === null) return 'null';
+      if (Array.isArray(x)) return `array(${x.length})`;
+      return typeof x;
+    }
+
+    function shortPreview(x) {
+      if (x === null) return 'null';
+      if (Array.isArray(x)) return `[${x.length}]`;
+      if (isObject(x)) return `{${Object.keys(x).length}}`;
+      if (typeof x === 'string') return x.length > 80 ? JSON.stringify(x.slice(0, 77) + '…') : JSON.stringify(x);
+      return String(x);
+    }
+
+    function maskSecrets(obj, path = []) {
+      if (obj === null || obj === undefined) return obj;
+
+      if (Array.isArray(obj)) return obj.map((v, i) => maskSecrets(v, path.concat(String(i))));
+
+      if (isObject(obj)) {
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) {
+          const kl = String(k).toLowerCase();
+          const pl = path.concat(k).join('.').toLowerCase();
+          const looksSecret =
+            kl.includes('key') || kl.includes('token') || kl.includes('secret') || kl.includes('password') ||
+            pl.includes('apikey') || (pl.includes('openai') && kl.includes('key'));
+
+          if (looksSecret && typeof v === 'string' && v.length) out[k] = '••••••••';
+          else out[k] = maskSecrets(v, path.concat(k));
+        }
+        return out;
+      }
+
+      return obj;
+    }
+
+    function matchesFilter(key, value, filter) {
+      if (!filter) return true;
+      const k = String(key ?? '').toLowerCase();
+      let v = '';
+      try {
+        v = (typeof value === 'string') ? value.toLowerCase() : JSON.stringify(value ?? '').toLowerCase();
+      } catch {
+        v = String(value ?? '').toLowerCase();
+      }
+      return k.includes(filter) || v.includes(filter);
+    }
+
+    function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+    function renderTree(data, filter) {
+      clear(treeEl);
+      if (!data) {
+        const empty = document.createElement('div');
+        empty.textContent = '(no config)';
+        treeEl.appendChild(empty);
+        return;
+      }
+      const root = renderValue('(root)', data, filter, 0, true);
+      treeEl.appendChild(root);
+      // start collapsed by default for sanity
+      treeEl.querySelectorAll('details').forEach(d => d.open = false);
+      // keep root open
+      const firstDetails = treeEl.querySelector('details');
+      if (firstDetails) firstDetails.open = true;
+    }
+
+    function renderValue(key, value, filter, depth, isRoot = false) {
+      const node = document.createElement('div');
+      node.className = 'node';
+      node.style.marginLeft = isRoot ? '0px' : (depth * 14) + 'px';
+
+      const isArr = Array.isArray(value);
+      const isObj = isObject(value);
+
+      // Primitive
+      if (!isArr && !isObj) {
+        if (!matchesFilter(key, value, filter)) return document.createDocumentFragment();
+        const line = document.createElement('div');
+        const k = document.createElement('span');
+        k.className = 'k';
+        k.textContent = key;
+
+        const colon = document.createElement('span');
+        colon.textContent = ': ';
+
+        const v = document.createElement('span');
+        v.className = 'v';
+        v.textContent = shortPreview(value);
+
+        const t = document.createElement('span');
+        t.className = 't';
+        t.textContent = typeLabel(value);
+
+        line.appendChild(k);
+        line.appendChild(colon);
+        line.appendChild(v);
+        line.appendChild(t);
+        node.appendChild(line);
+        return node;
+      }
+
+      // Container
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+
+      const k = document.createElement('span');
+      k.className = 'k';
+      k.textContent = key;
+
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = typeLabel(value);
+
+      const preview = document.createElement('span');
+      preview.className = 't';
+      preview.textContent = shortPreview(value);
+
+      summary.appendChild(k);
+      summary.appendChild(badge);
+      summary.appendChild(preview);
+
+      details.appendChild(summary);
+
+      const childrenWrap = document.createElement('div');
+      details.appendChild(childrenWrap);
+
+      let anyChild = false;
+
+      if (isArr) {
+        for (let i = 0; i < value.length; i++) {
+          const child = renderValue(String(i), value[i], filter, depth + 1);
+          if (child && child.childNodes && child.childNodes.length) {
+            anyChild = true;
+            childrenWrap.appendChild(child);
+          }
+        }
+      } else {
+        const entries = Object.entries(value);
+        for (const [ck, cv] of entries) {
+          const child = renderValue(ck, cv, filter, depth + 1);
+          if (child && child.childNodes && child.childNodes.length) {
+            anyChild = true;
+            childrenWrap.appendChild(child);
+          }
+        }
+      }
+
+      // If nothing matches filter, hide this whole branch
+      if (!anyChild && filter && !matchesFilter(key, value, filter)) {
+        return document.createDocumentFragment();
+      }
+
+      node.appendChild(details);
+      return node;
+    }
+
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'config') {
+        const p = msg.payload;
+
+        cfgPathEl.textContent = p.configPath || '';
+        keyStatusEl.textContent = p.apiKeySet ? 'set' : 'not set';
+        keyStatusEl.className = p.apiKeySet ? 'ok' : 'warn';
+
+        lastConfigRaw = p.data ?? {};
+        lastConfigMasked = maskSecrets(lastConfigRaw);
+
+        renderTree(lastConfigMasked, (filterEl.value || '').trim().toLowerCase());
+        return;
+      }
+    });
+
+    vscode.postMessage({ type: 'ready' });
+  </script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+{
+  "name": "idyicyanere",
+  "displayName": "idyicyanere",
+  "main": "./dist/extension.js",
+  "description": "Intelligent file editing",
+  "publisher": "waajacu",
+  "version": "0.3.0",
+  "scripts": {
+    "compile": "tsc -p .",
+
+    "native:clean": "node-gyp clean --directory native/idydb-addon",
+    "build:native": "node-gyp rebuild --directory native/idydb-addon",
+
+    "vsix:clean": "node -e \"require('fs').rmSync('dist-vsix', {recursive:true, force:true}); require('fs').mkdirSync('dist-vsix', {recursive:true});\"",
+    "vsix:package": "node -e \"const {execSync}=require('child_process'); const os=process.platform; const arch=process.arch; const out=`dist-vsix/idyicyanere-${os}-${arch}.vsix`; execSync(`npx vsce package -o ${out}`,{stdio:'inherit'});\"",
+
+    "vsix:local": "npm run vsix:clean && npm run compile && npm run build:native && npm run vsix:package",
+
+    "vsix:linux": "npm run vsix:local",
+    "vsix:darwin": "npm run vsix:local",
+    "vsix:win32": "npm run vsix:local"
+  },
+  "contributes": {
+    "keybindings": [
+      {
+        "command": "workbench.view.extension.idyicyanere",
+        "key": "alt+shift+i",
+        "mac": "alt+shift+i",
+        "when": "editorTextFocus || filesExplorerFocus || sideBarFocus"
+      }
+    ],
+    "commands": [
+      { "command": "idyicyanere.openConfig", "title": "idyicyanere: Open Config" },
+      { "command": "idyicyanere.setApiKey", "title": "idyicyanere: Set OpenAI API Key" },
+      { "command": "idyicyanere.showLogs", "title": "idyicyanere: Show Logs" },
+      { "command": "idyicyanere.debugRag", "title": "idyicyanere: Debug RAG Query" },
+      { "command": "idyicyanere.refreshAll", "title": "⟳ Refresh All", "icon": "$(refresh)" },
+      { "command": "idyicyanere.nuke", "title": "idyicyanere: Nuke (Delete DB + Dumps)", "icon": "$(trash)" },
+      { "command": "idyicyanere.dumpContext.PickModal", "title": "idyicyanere: Dump Context (Picker)" },
+      { "command": "idyicyanere.dumpContext.Indexed", "title": "idyicyanere: Dump Context (Indexed)" },
+      { "command": "idyicyanere.dumpContext.OpenLatest", "title": "idyicyanere: Dump Context Open Latest " },
+      { "command": "idyicyanere.dumpContext.OpenBackups", "title": "idyicyanere: Dump Context Open Backups" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereFiles" },
+        { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereChat" },
+        { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereEdit" },
+        { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereDb" },
+        { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereConfig" },
+        { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereCommands" }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "idyicyanere",
+          "title": "idyicyanere",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "idyicyanere": [
+        { "id": "idyicyanereFiles", "name": "Files", "type": "webview", "icon": "media/icon.png" },
+        { "id": "idyicyanereChat", "name": "Chat", "type": "webview", "icon": "media/icon.png" },
+        { "id": "idyicyanereEdit", "name": "Edit", "type": "webview", "icon": "media/icon.png" },
+        { "id": "idyicyanereDb", "name": "Database", "type": "webview", "icon": "media/icon.png" },
+        { "id": "idyicyanereConfig", "name": "Config", "type": "webview", "icon": "media/icon.png" },
+        { "id": "idyicyanereCommands","name": "Commands", "type": "webview", "icon": "media/icon.png" }
+      ]
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "dependencies": {
+    "openai": "^6.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "node-addon-api": "^8.5.0",
+    "node-gyp": "^12.2.0",
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "dist/**",
+    "media/**",
+    "native/idydb-addon/build/Release/*.node",
+    "native/idydb-addon/idydb/include/**",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ]
+}

@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="__CSP__"
+  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>idyicyanere Database</title>
+  <style>
+    body { font-family: var(--vscode-font-family); padding: 10px; }
+
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+    button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: 0;
+      padding: 2px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    button.danger {
+      background: var(--vscode-testing-iconFailed);
+      color: var(--vscode-button-foreground);
+    }
+
+    /* Small icon buttons */
+    .iconbtn {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+
+      cursor: pointer;
+      background: transparent;
+      color: var(--vscode-button-secondaryForeground);
+      border: 1px solid var(--vscode-editorWidget-border);
+    }
+    .iconbtn:hover {
+      background: var(--vscode-button-secondaryBackground);
+      border-color: var(--vscode-editorWidget-border);
+    }
+    .iconbtn:active { transform: translateY(1px); }
+    .iconbtn:disabled {
+      opacity: 0.45;
+      cursor: default;
+      filter: grayscale(0.4);
+    }
+    .iconbtn:disabled:hover { background: transparent; }
+
+    .iconbtn svg {
+      width: 13px;
+      height: 13px;
+      fill: currentColor;
+      display: block;
+    }
+
+    .iconbtn.danger {
+      border: 0;
+      background: var(--vscode-testing-iconFailed);
+      color: var(--vscode-button-foreground);
+    }
+    .iconbtn.danger:hover { filter: brightness(1.06); }
+
+    .actions { white-space: nowrap; }
+
+    /* Action rail: makes the icons feel like one compact control */
+    .btnrail {
+      display: inline-flex;
+      gap: 4px;
+      padding: 2px;
+      border-radius: 9px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      background: var(--vscode-sideBar-background);
+    }
+
+    .status { opacity: 0.8; margin: 8px 0; }
+    .box {
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 10px; }
+    .k { opacity: 0.85; }
+    .mono { font-family: var(--vscode-editor-font-family); font-size: 12px; }
+
+    textarea, input, select {
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 6px;
+      padding: 6px;
+    }
+    textarea { width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box; }
+
+    /* Compact table styling */
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td {
+      text-align: left;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+      vertical-align: middle;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    th { opacity: 0.8; font-weight: 600; }
+
+    .filesTable th:nth-child(2),
+    .filesTable td:nth-child(2) { width: 64px; }
+    .filesTable th:nth-child(3),
+    .filesTable td:nth-child(3) { width: 56px; }
+    .filesTable th:nth-child(4),
+    .filesTable td:nth-child(4) { width: 130px; }
+
+    .fileCell {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .chunksCell { text-align: right; padding-right: 10px; opacity: 0.95; }
+
+    /* single-letter status badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      font-size: 11px;
+      user-select: none;
+    }
+    .badge.ok { opacity: 0.9; }
+    .badge.hidden { border-style: dashed; }
+    .badge.missing { border-color: var(--vscode-errorForeground); }
+
+    .err { color: var(--vscode-errorForeground); }
+
+    .resultWrap {
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 8px;
+      padding: 8px;
+      background: var(--vscode-editorWidget-background);
+      overflow: auto;
+    }
+    .resultMeta {
+      opacity: 0.85;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .resultCard {
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 8px;
+      padding: 8px;
+      margin-top: 8px;
+      background: var(--vscode-sideBar-background);
+    }
+    .resultHeader {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .resultTitle { font-weight: 600; }
+    .resultSub { opacity: 0.8; font-size: 11px; }
+    .resultBody {
+      margin-top: 6px;
+      padding: 8px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 6px;
+      background: var(--vscode-input-background);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    mark.hl {
+      background: var(--vscode-editor-findMatchHighlightBackground);
+      color: var(--vscode-editor-foreground);
+      padding: 0 2px;
+      border-radius: 3px;
+    }
+    button[disabled] {
+      opacity: 0.6;
+      cursor: default;
+      filter: grayscale(0.25);
+    }
+
+    button.busy {
+      position: relative;
+    }
+
+    button.busy::after {
+      content: "…";
+      margin-left: 6px;
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+  <div class="row" style="justify-content: space-between;">
+    <strong>Database</strong>
+    <div class="row">
+      <button class="secondary" id="btnFix">Fix</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="box">
+    <div class="row" style="justify-content: space-between; margin-bottom: 8px;">
+      <strong>Indexed Files</strong>
+      <input id="filter" placeholder="Filter…" />
+    </div>
+    <div id="filesWrap"></div>
+  </div>
+
+  <div class="box">
+    <strong>Query (vector search)</strong>
+    <p class="mono" style="opacity:0.8; margin-top:6px;">
+      Enter = search, Shift+Enter = newline
+    </p>
+
+    <textarea id="q" placeholder="Type a query to retrieve matching chunks..."></textarea>
+
+    <div class="row" style="margin-top: 8px;">
+      <button id="btnQuery">Search</button>
+      <button class="secondary" id="btnClear">Clear</button>
+
+      <span style="flex: 1"></span>
+
+      <label class="mono">k <input id="k" type="number" min="1" max="50" style="width: 80px;" /></label>
+      <label class="mono">maxChars <input id="maxChars" type="number" min="1000" max="200000" style="width: 110px;" /></label>
+      <label class="mono">metric
+        <select id="metric">
+          <option value="cosine">cosine</option>
+          <option value="l2">l2</option>
+        </select>
+      </label>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <div class="row" style="justify-content: space-between; align-items: baseline;">
+        <div class="mono" style="opacity:0.8;">Result</div>
+        <div class="row">
+          <button class="secondary" id="btnCopyResult">Copy</button>
+          <button class="secondary" id="btnToggleRaw">Raw</button>
+        </div>
+      </div>
+
+      <div id="result" class="resultWrap mono"></div>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="row" style="justify-content: space-between; margin-bottom: 6px;">
+      <strong>Stats</strong>
+      <span class="mono" id="dbPath"></span>
+    </div>
+    <div class="kv" id="stats"></div>
+  </div>
+
+  <div id="errors" class="err"></div>
+
+  <script nonce="__NONCE__">
+    const vscode = acquireVsCodeApi();
+
+    const statusEl = document.getElementById('status');
+    const statsEl = document.getElementById('stats');
+    const dbPathEl = document.getElementById('dbPath');
+    const filesWrap = document.getElementById('filesWrap');
+    const filterEl = document.getElementById('filter');
+
+    const qEl = document.getElementById('q');
+    const btnQuery = document.getElementById('btnQuery');
+    const btnClear = document.getElementById('btnClear');
+
+    const resultEl = document.getElementById('result');
+    const btnCopyResult = document.getElementById('btnCopyResult');
+    const btnToggleRaw = document.getElementById('btnToggleRaw');
+
+    const kEl = document.getElementById('k');
+    const maxCharsEl = document.getElementById('maxChars');
+    const metricEl = document.getElementById('metric');
+    const btnFix = document.getElementById('btnFix');
+
+    let fixBusy = false;
+
+    let fixInFlight = false;
+
+    function setFixBusy(on) {
+      fixBusy = !!on;
+      if (!btnFix) return;
+      btnFix.disabled = fixBusy;
+      btnFix.classList.toggle('busy', fixBusy);
+    }
+
+    window.addEventListener('error', (e) => {
+      vscode.postMessage({
+        type: 'clientError',
+        text: e.message || 'Webview error',
+        stack: e.error?.stack
+      });
+    });
+
+    window.addEventListener('unhandledrejection', (e) => {
+      const reason = e.reason?.message ? e.reason.message : String(e.reason);
+      vscode.postMessage({
+        type: 'clientError',
+        text: reason || 'Unhandled rejection',
+        stack: e.reason?.stack
+      });
+    });
+
+    btnFix?.addEventListener('click', () => {
+      if (fixBusy) return;
+
+      // reset as well
+      resultEl.innerHTML = '';
+      statusEl.textContent = 'Fixing stale files…';
+      lastResultText = '';
+      showRaw = false;
+      btnToggleRaw.textContent = 'Raw';
+      document.getElementById('errors').innerHTML = '';
+
+      fixInFlight = true;
+      setFixBusy(true);
+
+      vscode.postMessage({ type: 'fix' });
+    });
+
+    btnClear.addEventListener('click', () => {
+      resultEl.innerHTML = '';
+      statusEl.textContent = '';
+      lastResultText = '';
+    });
+
+    function escHtml(s) {
+      return (s ?? '')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+    }
+    function fmtBytes(n) {
+      if (n == null) return '';
+      const u = ['B','KB','MB','GB','TB'];
+      let i = 0, v = Number(n);
+      while (v >= 1024 && i < u.length-1) { v /= 1024; i++; }
+      return v.toFixed(i === 0 ? 0 : 2) + ' ' + u[i];
+    }
+    function fmtDate(ms) {
+      if (ms == null) return '';
+      try { return new Date(ms).toLocaleString(); } catch { return String(ms); }
+    }
+
+    let currentFiles = [];
+    let lastResultText = '';
+    let showRaw = false;
+
+    btnCopyResult?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(lastResultText || '');
+        statusEl.textContent = 'Copied.';
+        setTimeout(() => {
+          if (statusEl.textContent === 'Copied.') statusEl.textContent = '';
+        }, 900);
+      } catch (e) {
+        vscode.postMessage({ type: 'clientError', text: 'Copy failed', stack: e?.stack });
+      }
+    });
+
+    btnToggleRaw?.addEventListener('click', () => {
+      showRaw = !showRaw;
+      btnToggleRaw.textContent = showRaw ? 'Pretty' : 'Raw';
+      if (lastResultText) renderPretty(lastResultText, qEl.value || '');
+    });
+
+    resultEl.addEventListener('click', (e) => {
+      const btn = e.target?.closest?.('button.openHit');
+      if (!btn) return;
+      const uri = btn.getAttribute('data-uri');
+      if (uri) vscode.postMessage({ type: 'openFile', uri });
+    });
+
+    function safeJsonParse(s) {
+      if (typeof s !== 'string') return null;
+      const t = s.trim();
+      if (!t) return null;
+      if (!(t.startsWith('{') || t.startsWith('['))) return null;
+      try { return JSON.parse(t); } catch { return null; }
+    }
+
+    function extractTerms(q) {
+      const parts = String(q || '')
+        .toLowerCase()
+        .split(/\s+/g)
+        .map(x => x.trim())
+        .filter(x => x.length >= 2);
+
+      const uniq = [];
+      for (const p of parts) if (!uniq.includes(p)) uniq.push(p);
+      return uniq.slice(0, 12);
+    }
+
+    function highlightText(text, terms) {
+      const raw = String(text ?? "");
+      if (!Array.isArray(terms) || terms.length === 0) {
+        return escHtml(raw);
+      }
+
+      let out = escHtml(raw);
+
+      for (const term of terms) {
+        if (!term) continue;
+
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(escaped, "ig");
+
+        out = out.replace(re, m => `<mark class="hl">${m}</mark>`);
+      }
+
+      return out;
+    }
+
+    function pickHits(obj) {
+      if (Array.isArray(obj)) return obj;
+      if (!obj || typeof obj !== 'object') return null;
+      for (const k of ['hits','results','matches','items','rows','chunks']) {
+        if (Array.isArray(obj[k])) return obj[k];
+      }
+      return null;
+    }
+
+    function renderPretty(payload, queryText) {
+      const parsed = safeJsonParse(payload);
+      const terms = extractTerms(queryText);
+
+      if (!parsed) {
+        resultEl.innerHTML = `<div class="resultBody">${highlightText(payload, terms)}</div>`;
+        return;
+      }
+
+      if (showRaw) {
+        const pretty = JSON.stringify(parsed, null, 2);
+        resultEl.innerHTML = `<div class="resultBody">${escHtml(pretty)}</div>`;
+        return;
+      }
+
+      const hits = pickHits(parsed);
+      if (!hits) {
+        const pretty = JSON.stringify(parsed, null, 2);
+        resultEl.innerHTML = `<div class="resultBody">${escHtml(pretty)}</div>`;
+        return;
+      }
+
+      const total = hits.length;
+      const trunc = !!parsed.truncated;
+      const params = parsed.params || parsed.rag || null;
+
+      const metaBits = [];
+      metaBits.push(`<span>Matches: <strong>${total}</strong></span>`);
+      if (params?.k != null) metaBits.push(`<span>k: <strong>${escHtml(String(params.k))}</strong></span>`);
+      if (params?.metric) metaBits.push(`<span>metric: <strong>${escHtml(String(params.metric))}</strong></span>`);
+      if (params?.maxChars != null) metaBits.push(`<span>maxChars: <strong>${escHtml(String(params.maxChars))}</strong></span>`);
+      if (trunc) metaBits.push(`<span class="badge">trunc</span>`);
+
+      let html = `<div class="resultMeta">${metaBits.join('')}</div>`;
+
+      hits.forEach((h, i) => {
+        const rank = i + 1;
+        const file  = h.rel ?? h.file ?? h.path ?? h.source ?? '';
+        const chunking = h.chunking ?? '';
+        const chunk = h.text ?? h.chunk ?? h.content ?? '';
+        const uri = h.uri ?? '';
+
+        const sub = [chunking ? `chunking: ${String(chunking)}` : ''].filter(Boolean).join(' • ');
+        const openBtn = uri ? `<button class="secondary tiny openHit" data-uri="${escHtml(String(uri))}">Open</button>` : '';
+
+        html += `
+          <div class="resultCard">
+            <div class="resultHeader">
+              <div>
+                <span class="resultTitle">#${rank}</span>
+                <span class="resultSub">${escHtml(sub)}</span>
+              </div>
+              <div class="row" style="gap:8px; justify-content:flex-end;">
+                <div class="resultSub">${escHtml(String(file))}</div>
+                ${openBtn}
+              </div>
+            </div>
+            <div class="resultBody">${highlightText(chunk, terms)}</div>
+          </div>
+        `;
+      });
+
+      resultEl.innerHTML = html;
+    }
+
+    function kvRow(k, v) {
+      const kk = document.createElement('div');
+      kk.className = 'k mono';
+      kk.textContent = k;
+
+      const vv = document.createElement('div');
+      vv.className = 'mono';
+      vv.textContent = v ?? '';
+
+      statsEl.appendChild(kk);
+      statsEl.appendChild(vv);
+    }
+
+    function statusBadge(row) {
+      // Priority: missing > stale > hidden > ok
+      if (row.missing) return { txt: 'missing', cls: 'missing', tip: 'missing' };
+      if (row.stale)   return { txt: 'stale', cls: 'stale',   tip: 'stale' };
+      if (row.hidden)  return { txt: 'hidden', cls: 'hidden',  tip: 'hidden' };
+      return { txt: '✓', cls: 'ok', tip: 'ok' };
+    }
+
+    function renderFiles(filterText) {
+      const f = (filterText ?? '').toLowerCase();
+      const list = currentFiles.filter(x => !f || (x.rel ?? '').toLowerCase().includes(f));
+
+      const table = document.createElement('table');
+      table.className = 'filesTable';
+      table.innerHTML =
+        '<thead><tr><th>File</th><th style="text-align:right; padding-right:10px;">#</th><th>Status</th><th>Actions</th></tr></thead>';
+
+      const tb = document.createElement('tbody');
+
+      const ICONS = {
+        purge: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM6 9h2v9H6V9zm1 12h10a2 2 0 0 0 2-2V8H5v11a2 2 0 0 0 2 2z"/></svg>',
+        open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4h10v10h-2V7.41l-9.29 9.3-1.42-1.42 9.3-9.29H10V4z"/><path d="M5 5h4v2H7v10h10v-2h2v4H5V5z"/></svg>',
+        reindex: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-8.66 3.54l-1.42 1.42A7 7 0 0 0 19 13c0-3.87-3.13-7-7-7z"/></svg>',
+        hide: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c5.5 0 9.5 5.2 9.5 7s-4 7-9.5 7S2.5 14.8 2.5 12 6.5 5 12 5zm0 2c-3.8 0-7 3.7-7 5s3.2 5 7 5 7-3.7 7-5-3.2-5-7-5zm0 2.2A2.8 2.8 0 1 1 9.2 12 2.8 2.8 0 0 1 12 9.2z"/></svg>',
+        unhide: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 4.2 3.5 2.8 21.2 20.5l-1.4 1.4-3-3A11.4 11.4 0 0 1 12 19c-5.5 0-9.5-5.2-9.5-7 0-1.1 1.5-3.2 3.9-4.9l-4.3-4.9zM12 7c1 0 2 .2 2.9.6l-1.6 1.6A2.8 2.8 0 0 0 9.2 12c0 .5.1 1 .4 1.4l-1.5 1.5c-.6-.8-1-1.8-1-2.9 0-2.8 2.3-5 5-5zm9.5 5c0 .8-1 2.4-2.6 3.8l-1.5-1.5c1.1-1 1.9-2.1 1.9-2.3 0-1.3-3.2-5-7-5-.4 0-.9 0-1.3.1L9.3 5.3C10.1 5.1 11 5 12 5c5.5 0 9.5 5.2 9.5 7z"/></svg>'
+      };
+
+      function makeIconBtn({ title, className, svg, onClick, disabled }) {
+        const b = document.createElement('button');
+        b.className = className;
+        b.type = 'button';
+        b.title = title;
+        b.setAttribute('aria-label', title);
+        b.innerHTML = svg;
+        if (disabled) {
+          b.disabled = true;
+        } else {
+          b.addEventListener('click', onClick);
+        }
+        return b;
+      }
+
+      for (const row of list) {
+        const tr = document.createElement('tr');
+
+        const tdFile = document.createElement('td');
+        tdFile.className = 'mono fileCell';
+        tdFile.title = row.rel;
+        tdFile.textContent = row.rel;
+
+        const tdChunks = document.createElement('td');
+        tdChunks.className = 'mono chunksCell';
+        tdChunks.textContent = String(row.rows);
+
+        const tdStatus = document.createElement('td');
+        const sb = statusBadge(row);
+        tdStatus.innerHTML = `<span class="badge ${escHtml(sb.cls)}" title="${escHtml(sb.tip)}">${escHtml(sb.txt)}</span>`;
+
+        const tdActions = document.createElement('td');
+        tdActions.className = 'actions';
+
+        const rail = document.createElement('div');
+        rail.className = 'btnrail';
+
+        const bPurge = makeIconBtn({
+          title: 'Purge vectors',
+          className: 'iconbtn danger',
+          svg: ICONS.purge,
+          onClick: () => vscode.postMessage({ type: 'purgeFile', uri: row.uri }),
+          disabled: false
+        });
+
+        const bOpen = makeIconBtn({
+          title: row.missing ? 'Open (file missing)' : 'Open file',
+          className: 'iconbtn',
+          svg: ICONS.open,
+          onClick: () => vscode.postMessage({ type: 'openFile', uri: row.uri }),
+          disabled: !!row.missing
+        });
+
+        const bRe = makeIconBtn({
+          title: row.missing ? 'Reindex (file missing)' : 'Reindex file',
+          className: 'iconbtn',
+          svg: ICONS.reindex,
+          onClick: () => vscode.postMessage({ type: 'reindexFile', uri: row.uri }),
+          disabled: !!row.missing
+        });
+
+        const bHide = makeIconBtn({
+          title: row.hidden ? 'Unhide file' : 'Hide file',
+          className: 'iconbtn',
+          svg: row.hidden ? ICONS.unhide : ICONS.hide,
+          onClick: () => vscode.postMessage({ type: 'setHidden', uri: row.uri, hidden: !row.hidden }),
+          disabled: false
+        });
+
+        // order: Purge, Open, Reindex, Hide
+        rail.appendChild(bPurge);
+        rail.appendChild(bOpen);
+        rail.appendChild(bRe);
+        rail.appendChild(bHide);
+
+        tdActions.appendChild(rail);
+
+        tr.appendChild(tdFile);
+        tr.appendChild(tdChunks);
+        tr.appendChild(tdStatus);
+        tr.appendChild(tdActions);
+
+        tb.appendChild(tr);
+      }
+
+      table.appendChild(tb);
+      filesWrap.innerHTML = '';
+      filesWrap.appendChild(table);
+    }
+
+    filterEl.addEventListener('input', () => renderFiles(filterEl.value));
+
+    function doQuery() {
+      const text = (qEl.value || '').trim();
+      if (!text) return;
+
+      statusEl.textContent = 'Working…';
+      vscode.postMessage({
+        type: 'query',
+        text,
+        k: Number(kEl.value || 0) || undefined,
+        maxChars: Number(maxCharsEl.value || 0) || undefined,
+        metric: metricEl.value
+      });
+    }
+
+    btnQuery.addEventListener('click', doQuery);
+
+    qEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        doQuery();
+      }
+    });
+
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'status') {
+        statusEl.textContent = msg.text || '';
+        return;
+      }
+      if (msg.type === 'error') {
+        fixInFlight = false;
+        setFixBusy(false);
+        statusEl.textContent = '';
+        const d = document.createElement('div');
+        d.className = 'err';
+        d.textContent = msg.text || 'Unknown error';
+        document.getElementById('errors').appendChild(d);
+        return;
+      }
+      if (msg.type === 'stats') {
+        const s = msg.stats;
+        const t = msg.text || '';
+        statusEl.textContent = t;
+
+        dbPathEl.textContent = s.dbPath || '';
+        statsEl.innerHTML = '';
+
+        kvRow('DB exists', String(!!s.dbExists));
+        kvRow('DB size', s.dbSizeBytes == null ? '' : fmtBytes(s.dbSizeBytes));
+        kvRow('DB modified', s.dbMtimeMs == null ? '' : fmtDate(s.dbMtimeMs));
+        kvRow('Next row', s.nextRow == null ? '' : String(s.nextRow));
+
+        kvRow('Embedding model', s.embeddingModel || '');
+        kvRow('Chat model', s.chatModel || '');
+
+        kvRow('Files (total)', String(s.totalFiles ?? 0));
+        kvRow('Files (included)', String(s.includedFiles ?? 0));
+        kvRow('Files (hidden)', String(s.hiddenFiles ?? 0));
+        kvRow('Rows (all)', String(s.trackedRowsAll ?? 0));
+        kvRow('Rows (included)', String(s.trackedRowsIncluded ?? 0));
+        kvRow('Unique rows (all)', String(s.uniqueRowsAll ?? 0));
+        kvRow('Unique rows (included)', String(s.uniqueRowsIncluded ?? 0));
+
+        if (s.rag) {
+          kEl.value = String(s.rag.k ?? '');
+          maxCharsEl.value = String(s.rag.maxChars ?? '');
+          metricEl.value = String(s.rag.metric ?? 'cosine');
+        }
+
+        currentFiles = s.files || [];
+        renderFiles(filterEl.value || '');
+
+        // Only treat "status cleared" as completion if we initiated a Fix.
+        if (fixInFlight && !t) {
+          fixInFlight = false;
+          setFixBusy(false);
+        }
+        return;
+      }
+      if (msg.type === 'queryResult') {
+        statusEl.textContent = '';
+        const payload = msg.payload ?? msg.context ?? msg.text ?? '';
+        lastResultText = (typeof payload === 'string') ? payload : JSON.stringify(payload, null, 2);
+        renderPretty(lastResultText, qEl.value || '');
+        return;
+      }
+    });
+
+    vscode.postMessage({ type: 'ready' });
+  </script>
+</body>
+</html>

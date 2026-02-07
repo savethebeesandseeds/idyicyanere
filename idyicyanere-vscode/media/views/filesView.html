@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>idyicyanere Files</title>
+  <style>
+    :root{
+      --pad: 10px;
+      --r: 10px;
+      --b: 1px solid var(--vscode-panel-border);
+      --muted: var(--vscode-descriptionForeground);
+      --bg: var(--vscode-editor-background);
+      --bg2: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      --fg: var(--vscode-foreground);
+      --mono: var(--vscode-editor-font-family);
+
+      /* compact sizes */
+      --rowPadY: 3px;
+      --rowPadX: 8px;
+      --cellGap: 8px;
+
+      --tw: 16px; /* twisty size */
+      --twGap: 6px;
+
+      --btn: 20px; /* icon button size */
+      --btnR: 7px;
+
+      --badgeH: 16px;
+      --badgeW: 24px;
+    }
+
+    body { margin:0; padding: var(--pad); color: var(--fg); font-family: var(--vscode-font-family); }
+
+    .topbar{ display:flex; gap:8px; align-items:center; margin-bottom: 6px; }
+    .search{
+      flex:1; min-width:120px;
+      padding: 5px 8px;
+      border-radius: 10px;
+      border: var(--b);
+      background: var(--bg);
+      color: var(--fg);
+      outline:none;
+      font-size: 12px;
+    }
+
+    .iconbtn{
+      width: 24px; height: 24px;
+      border-radius: 8px;
+      display:inline-flex; align-items:center; justify-content:center;
+      cursor:pointer;
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--vscode-editorWidget-border);
+      user-select:none;
+      padding: 0;
+    }
+    .iconbtn:hover{ background: var(--vscode-button-secondaryBackground); }
+    .iconbtn:disabled{ opacity: 0.45; cursor: default; }
+    .iconbtn svg{
+      width: 13px;
+      height: 13px;
+      display:block;
+    }
+
+    /* default: outline icons look crisp */
+    .iconbtn svg path, .iconbtn svg circle, .iconbtn svg line, .iconbtn svg polyline, .iconbtn svg rect{
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .meta{
+      display:flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 4px 0 8px 0;
+      color: var(--muted);
+      font-size: 11px;
+      user-select: none;
+    }
+
+    .table{
+      border: var(--b);
+      border-radius: var(--r);
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    /* IMPORTANT: same grid for header + rows */
+    .thead, .tr{
+      display:grid;
+      /* Put priority on Path (name) column.
+         - Path keeps a minimum width
+         - Detail columns are allowed to shrink first (minmax(0, ...))
+         - Actions stays at intrinsic size (max-content) */
+      grid-template-columns:
+        minmax(260px, 1fr)   /* Path */
+        34px                 /* S */
+        minmax(0, 120px)     /* Chunk */
+        minmax(0, 86px)      /* Size */
+        minmax(0, 86px)      /* Ext */
+        max-content;         /* Actions */
+      align-items:center;
+      gap: var(--cellGap);
+    }
+
+    /* Allow header cells to actually shrink (otherwise min-content can “fight” the grid) */
+    .thead > div{
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .thead{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--bg2);
+      border-bottom: var(--b);
+      padding: 6px var(--rowPadX);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* Header path cell aligned to row label start */
+    .theadPath{
+      display:flex;
+      align-items:center;
+      gap: var(--twGap);
+      min-width: 0;
+    }
+    .theadSpacer{
+      width: var(--tw);
+      height: var(--tw);
+      opacity: 0;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      flex: 0 0 auto;
+    }
+
+    .tbody{ max-height: calc(100vh - 112px); overflow:auto; }
+
+    .tr{
+      padding: var(--rowPadY) var(--rowPadX);
+      border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
+      font-size: 12px;
+      line-height: 1.1;
+      cursor: default;
+    }
+    .tr:last-child{ border-bottom:none; }
+    .tr:hover{ background: color-mix(in srgb, var(--vscode-list-hoverBackground) 55%, transparent); }
+
+    .nameCell{
+      display:flex; align-items:center; gap: var(--twGap);
+      min-width: 0;
+    }
+
+    .twisty{
+      width: var(--tw); height: var(--tw);
+      border-radius: 6px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      background: transparent;
+      color: var(--muted);
+      display:inline-flex; align-items:center; justify-content:center;
+      cursor:pointer;
+      user-select:none;
+      padding: 0;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+    .twisty:hover{ background: color-mix(in srgb, var(--vscode-button-background) 18%, transparent); }
+    .twisty.none{ opacity:0; pointer-events:none; }
+
+    .label{
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width: var(--badgeW);
+      height: var(--badgeH);
+      border-radius: 999px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      font-family: var(--mono);
+      font-size: 11px;
+      user-select:none;
+      line-height: 1;
+    }
+
+    .mono{
+      font-family: var(--mono);
+      font-size: 12px;
+      opacity: 0.92;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .actions{
+      display:flex;
+      justify-content:flex-end;
+      justify-self: end;
+      align-items:center;
+      gap: 6px;
+    }
+
+    .rail{
+      display:inline-flex;
+      gap: 3px;
+      padding: 1px;
+      border-radius: 9px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      background: var(--vscode-sideBar-background);
+    }
+
+    .rail .iconbtn{
+      width: var(--btn);
+      height: var(--btn);
+      border-radius: var(--btnR);
+    }
+    .rail .iconbtn svg{
+      width: 12px;
+      height: 12px;
+    }
+
+    .statusLine{ margin-top: 6px; color: var(--muted); font-size: 11px; min-height: 14px; }
+
+    /* ---- status color hints on TEXT (subtle, but clear) ---- */
+    .hint-indexed  .label{ color: var(--vscode-testing-iconPassed); }
+    .hint-stale    .label{ color: var(--vscode-editorWarning-foreground); opacity: 0.75; }
+    .hint-indexing .label{ color: var(--vscode-testing-iconQueued); opacity: 0.35; }
+    .hint-hidden   .label{ color: var(--vscode-list-deemphasizedForeground); opacity: 0.85; }
+    .hint-not      .label{ color: var(--vscode-descriptionForeground); opacity: 0.88; }
+    .hint-error    .label{ color: var(--vscode-testing-iconFailed); }
+
+    /* file rows look clickable */
+    .row-file{ cursor: pointer; }
+    .row-folder, .row-root{ cursor: pointer; }
+  </style>
+</head>
+
+<body>
+  <div class="topbar">
+    <button id="btnRefresh" class="iconbtn" title="Refresh">
+      <svg viewBox="0 0 24 24"><path d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-8.66 3.54l-1.42 1.42A7 7 0 0 0 19 13c0-3.87-3.13-7-7-7z"/></svg>
+    </button>
+    <input id="filter" class="search" placeholder="Filter…" spellcheck="false" />
+  </div>
+
+  <div class="meta">
+    <div><span id="count">0</span> items shown</div>
+    <div>I indexed · S stale · … indexing · H hidden · — not indexed · ! error</div>
+  </div>
+
+  <div class="table" role="table" aria-label="Files">
+    <div class="thead" role="row">
+      <div class="theadPath" role="columnheader">
+        <span class="theadSpacer"></span>
+        <span>Path</span>
+      </div>
+      <div role="columnheader">S</div>
+      <div role="columnheader">Chunk</div>
+      <div role="columnheader">Size</div>
+      <div role="columnheader">Ext</div>
+      <div role="columnheader" style="text-align:right;">Actions</div>
+    </div>
+    <div id="body" class="tbody" role="rowgroup"></div>
+  </div>
+
+  <div id="status" class="statusLine"></div>
+
+  <script nonce="__NONCE__">
+    const vscode = acquireVsCodeApi();
+
+    const body   = document.getElementById('body');
+    const filter = document.getElementById('filter');
+    const count  = document.getElementById('count');
+    const status = document.getElementById('status');
+
+    const ICONS = {
+      open: '<svg viewBox="0 0 24 24"><path d="M10 4h10v10h-2V7.41l-9.29 9.3-1.42-1.42 9.3-9.29H10V4z"/><path d="M5 5h4v2H7v10h10v-2h2v4H5V5z"/></svg>',
+      index: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>',
+      reindex: '<svg viewBox="0 0 24 24"><path d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-8.66 3.54l-1.42 1.42A7 7 0 0 0 19 13c0-3.87-3.13-7-7-7z"/></svg>',
+      hide: '<svg viewBox="0 0 24 24"><path d="M12 5c5.5 0 9.5 5.2 9.5 7s-4 7-9.5 7S2.5 14.8 2.5 12 6.5 5 12 5zm0 2c-3.8 0-7 3.7-7 5s3.2 5 7 5 7-3.7 7-5-3.2-5-7-5zm0 2.2A2.8 2.8 0 1 1 9.2 12 2.8 2.8 0 0 1 12 9.2z"/></svg>',
+      unhide: '<svg viewBox="0 0 24 24"><path d="M2.1 4.2 3.5 2.8 21.2 20.5l-1.4 1.4-3-3A11.4 11.4 0 0 1 12 19c-5.5 0-9.5-5.2-9.5-7 0-1.1 1.5-3.2 3.9-4.9l-4.3-4.9z"/></svg>',
+      folderIndex: '<svg viewBox="0 0 24 24"><path d="M10 4h-6v16h16v-14h-8l-2-2zm1 9h-2v-3h2v3zm4 0h-2v-3h2v3zm4 0h-2v-3h2v3z"/></svg>',
+      folderHide: '<svg viewBox="0 0 24 24"><path d="M2.1 4.2 3.5 2.8 21.2 20.5l-1.4 1.4-3-3A11.4 11.4 0 0 1 12 19c-5.5 0-9.5-5.2-9.5-7 0-1.1 1.5-3.2 3.9-4.9l-4.3-4.9z"/><path d="M12 5c5.5 0 9.5 5.2 9.5 7 0 1.1-1.5 3.2-3.9 4.9l-1.4-1.4c1.8-1.3 2.8-2.8 2.8-3.5 0-.9-1.3-2.8-3.4-4.1C14.6 7.4 13.3 7 12 7c-1 0-2 .2-3 .6L7.6 6.2C9 5.5 10.5 5 12 5z"/></svg>',
+    };
+
+    const STATUS = {
+      indexed:    { ch:'I', tip:'Indexed',          color:'var(--vscode-testing-iconPassed)' },
+      stale:      { ch:'S', tip:'Indexed (stale)',  color:'var(--vscode-testing-iconSkipped)' },
+      indexing:   { ch:'…', tip:'Indexing…',        color:'var(--vscode-testing-iconQueued)' },
+      hidden:     { ch:'H', tip:'Hidden',           color:'var(--vscode-list-deemphasizedForeground)' },
+      not_indexed:{ ch:'—', tip:'Not indexed',      color:'var(--vscode-list-deemphasizedForeground)' },
+      error:      { ch:'!', tip:'Error',            color:'var(--vscode-testing-iconFailed)' }
+    };
+
+    // ---- tree model (lazy) ----
+    const nodes = new Map(); // uri -> {row,parent,children,expanded,loading,depth}
+    let rootUris = [];
+    const expanded = new Set(); // persistent across refresh
+
+    function esc(s){
+      return String(s ?? '')
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'","&#39;");
+    }
+
+    function fmtBytes(n){
+      if (n == null) return '';
+      const u = ['B','KB','MB','GB','TB'];
+      let i=0, v=Number(n);
+      while(v>=1024 && i<u.length-1){ v/=1024; i++; }
+      return i===0 ? v.toFixed(0)+' '+u[i] : v.toFixed(1)+' '+u[i];
+    }
+
+    function badgeHtml(kind){
+      const s = STATUS[kind] || STATUS.error;
+      return '<span class="badge" title="'+esc(s.tip)+'" style="color:'+esc(s.color)+'">'+esc(s.ch)+'</span>';
+    }
+
+    function twistyHtml(node){
+      const r = node.row;
+      if (r.kind === 'file') return '<span class="twisty none">›</span>';
+      const isOpen = !!node.expanded;
+      const isLoading = !!node.loading;
+      const glyph = isLoading ? '…' : (isOpen ? '⌄' : '›');
+      return '<button class="twisty" data-act="toggle" data-uri="'+esc(r.uri)+'" title="'+(isOpen?'Collapse':'Expand')+'">'+glyph+'</button>';
+    }
+
+    function actionIconButton(html, act, uri, title, extraAttrs=''){
+      return '<button class="iconbtn" data-act="'+act+'" data-uri="'+esc(uri)+'" title="'+esc(title)+'" '+extraAttrs+'>'+html+'</button>';
+    }
+
+    function actionsHtml(node){
+      const r = node.row;
+      if (r.kind === 'file') {
+        const st = r.status || 'not_indexed';
+        const busy = st === 'indexing';
+
+        const canHide = (st === 'indexed' || st === 'stale' || st === 'hidden' || st === 'error');
+        const isHidden = (st === 'hidden');
+
+        const idxIsReindex = (st === 'indexed' || st === 'stale');
+        const idxTitle = idxIsReindex ? 'Reindex' : 'Index';
+        const idxIcon = idxIsReindex ? ICONS.reindex : ICONS.index;
+        const idxAct  = idxIsReindex ? 'reindexFile' : 'indexFile';
+
+        const hideTitle = isHidden ? 'Unhide' : 'Hide';
+        const hideIcon  = isHidden ? ICONS.unhide : ICONS.hide;
+
+        return (
+          '<div class="rail">' +
+            actionIconButton(ICONS.open, 'openBtn', r.uri, 'Open') +
+            actionIconButton(idxIcon, idxAct, r.uri, idxTitle, busy ? 'disabled' : '') +
+            actionIconButton(hideIcon, 'setHidden', r.uri, hideTitle, ((!canHide || busy) ? 'disabled' : '') + ' data-hidden="'+(isHidden ? '0' : '1')+'"') +
+          '</div>'
+        );
+      }
+
+      // folder/root actions: batch index/hide
+      return (
+        '<div class="rail">' +
+          actionIconButton(ICONS.folderIndex, 'folderIndex', r.uri, 'Index folder (recursive)') +
+          actionIconButton(ICONS.folderHide, 'folderHide', r.uri, 'Hide indexed files in folder (recursive)') +
+        '</div>'
+      );
+    }
+
+    function nodeMatchesFilter(node, q){
+      if (!q) return true;
+      const r = node.row;
+      const hay = ((r.rel || '') + ' ' + (r.name || '')).toLowerCase();
+      return hay.includes(q);
+    }
+
+    function ancestors(uri){
+      const out = [];
+      let cur = nodes.get(uri);
+      while(cur && cur.parent){
+        out.push(cur.parent);
+        cur = nodes.get(cur.parent);
+      }
+      return out;
+    }
+
+    function visibleList(){
+      const q = (filter.value || '').trim().toLowerCase();
+
+      // Include matches + their ancestors, so filter keeps tree context.
+      const include = new Set();
+      if (q) {
+        for (const [uri, node] of nodes.entries()){
+          if (nodeMatchesFilter(node, q)){
+            include.add(uri);
+            for (const a of ancestors(uri)) include.add(a);
+          }
+        }
+      }
+
+      const out = [];
+      function walk(uri){
+        const node = nodes.get(uri);
+        if (!node) return;
+
+        if (!q || include.has(uri)) out.push(node);
+
+        if (node.expanded && Array.isArray(node.children)) {
+          for (const c of node.children) walk(c);
+        }
+      }
+
+      for (const r of rootUris) walk(r);
+      return out;
+    }
+
+    function inferContainerStatus(node){
+      if (!(node.row.kind === 'folder' || node.row.kind === 'root')) return null;
+
+      // If host provided an aggregate status, trust it.
+      if (node.row.status) return node.row.status;
+
+      const kids = node.children;
+      if (!Array.isArray(kids) || kids.length === 0) return null;
+
+      // priority: error > indexing > stale > hidden > indexed > not_indexed
+      let seenIndexed = false;
+      let seenHidden = false;
+
+      for (const u of kids){
+        const c = nodes.get(u);
+        if (!c) continue;
+
+        if (c.row.kind === 'file'){
+          const st = c.row.status || 'not_indexed';
+          if (st === 'error') return 'error';
+          if (st === 'indexing') return 'indexing';
+          if (st === 'stale') return 'stale';
+          if (st === 'hidden') seenHidden = true;
+          if (st === 'indexed') seenIndexed = true;
+        } else {
+          const inner = inferContainerStatus(c);
+          if (inner === 'error') return 'error';
+          if (inner === 'indexing') return 'indexing';
+          if (inner === 'stale') return 'stale';
+          if (inner === 'hidden') seenHidden = true;
+          if (inner === 'indexed') seenIndexed = true;
+        }
+      }
+
+      if (seenHidden && !seenIndexed) return 'hidden';
+      if (seenIndexed) return 'indexed';
+      return 'not_indexed';
+    }
+
+    function hintClassFor(kind){
+      switch(kind){
+        case 'indexed': return 'hint-indexed';
+        case 'stale': return 'hint-stale';
+        case 'indexing': return 'hint-indexing';
+        case 'hidden': return 'hint-hidden';
+        case 'not_indexed': return 'hint-not';
+        case 'error': return 'hint-error';
+        default: return '';
+      }
+    }
+
+    function render(){
+      const list = visibleList();
+      count.textContent = String(list.length);
+
+      body.innerHTML = list.map(node => {
+        const r = node.row;
+        const depth = node.depth || 0;
+
+        let hintKind = null;
+        let statusCell = '';
+
+        if (r.kind === 'file'){
+          hintKind = (r.status || 'not_indexed');
+          statusCell = badgeHtml(hintKind);
+        } else {
+          // Prefer host-provided recursive aggregate status if present.
+          // Fallback to UI inference over *loaded* children.
+          hintKind = (r.status || inferContainerStatus(node));
+          // show no badge for folders by default (keeps it clean),
+          // but still color-hint the label if we can infer.
+          statusCell = '';
+        }
+
+        const hintCls = hintKind ? hintClassFor(hintKind) : '';
+        const rowCls = (r.kind === 'file') ? 'row-file' : (r.kind === 'root' ? 'row-root' : 'row-folder');
+
+        return `
+          <div class="tr ${rowCls} ${hintCls}" role="row" data-uri="${esc(r.uri)}" data-kind="${esc(r.kind)}">
+            <div class="nameCell" role="cell" title="${esc(r.rel)}">
+              <span style="display:inline-block; width:${depth*12}px;"></span>
+              ${twistyHtml(node)}
+              <div class="label">${esc(r.name)}</div>
+            </div>
+            <div role="cell">${statusCell}</div>
+            <div class="mono" role="cell" title="${esc(r.chunking || '')}">${esc(r.chunking || '')}</div>
+            <div class="mono" role="cell" title="${esc(fmtBytes(r.sizeBytes))}">${esc(fmtBytes(r.sizeBytes))}</div>
+            <div class="mono" role="cell" title="${esc(r.ext || '')}">${esc(r.ext || '')}</div>
+            <div class="actions" role="cell">${actionsHtml(node)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function upsertNode(row, parentUri){
+      const parent = parentUri ? nodes.get(parentUri) : null;
+      const depth = parent ? (parent.depth + 1) : 0;
+
+      let node = nodes.get(row.uri);
+      if (!node){
+        node = { row, parent: parentUri || null, children: null, expanded: false, loading: false, depth };
+        nodes.set(row.uri, node);
+      } else {
+        node.row = row;
+        node.parent = parentUri || null;
+        node.depth = depth;
+      }
+      node.expanded = expanded.has(row.uri);
+      return node;
+    }
+
+    function applyExpanded(){
+      for (const uri of expanded){
+        const n = nodes.get(uri);
+        if (!n) continue;
+        n.expanded = true;
+
+        if ((n.row.kind === 'folder' || n.row.kind === 'root') && n.children == null && !n.loading){
+          n.loading = true;
+          vscode.postMessage({ type: 'getChildren', uri });
+        }
+      }
+    }
+
+    // ---- CLICK BEHAVIOR (B) ----
+    // - clicking the row toggles folder/root
+    // - clicking the row opens file
+    // - ignore clicks on buttons (actions/twisty)
+    body.addEventListener('click', (e) => {
+      const target = e.target;
+
+      // 1) action buttons keep their behavior
+      const btn = target?.closest?.('button[data-act]');
+      if (btn){
+        const act = btn.getAttribute('data-act');
+        const uri = btn.getAttribute('data-uri') || btn.closest('.tr')?.getAttribute('data-uri') || '';
+        if (!uri) return;
+
+        if (act === 'toggle'){
+          const node = nodes.get(uri);
+          if (!node) return;
+
+          const willOpen = !node.expanded;
+          node.expanded = willOpen;
+
+          if (willOpen) expanded.add(uri);
+          else expanded.delete(uri);
+
+          if (willOpen && node.children == null && !node.loading){
+            node.loading = true;
+            vscode.postMessage({ type: 'getChildren', uri });
+          }
+          render();
+          return;
+        }
+
+        if (act === 'openBtn'){
+          vscode.postMessage({ type: 'open', uri });
+          return;
+        }
+
+        if (act === 'indexFile'){
+          status.textContent = 'Indexing…';
+          vscode.postMessage({ type: 'indexFile', uri });
+          return;
+        }
+
+        if (act === 'reindexFile'){
+          status.textContent = 'Reindexing…';
+          vscode.postMessage({ type: 'reindexFile', uri });
+          return;
+        }
+
+        if (act === 'setHidden'){
+          const hidden = btn.getAttribute('data-hidden') === '1';
+          status.textContent = hidden ? 'Hiding…' : 'Unhiding…';
+          vscode.postMessage({ type: 'setHidden', uri, hidden });
+          return;
+        }
+
+        if (act === 'folderIndex'){
+          status.textContent = 'Indexing folder…';
+          vscode.postMessage({ type: 'folderBatch', uri, wantIndex: true });
+          return;
+        }
+
+        if (act === 'folderHide'){
+          status.textContent = 'Removing folder from index…';
+          vscode.postMessage({ type: 'folderBatch', uri, wantIndex: false });
+          return;
+        }
+
+        return;
+      }
+
+      // 2) row click behavior
+      const row = target?.closest?.('.tr');
+      if (!row) return;
+
+      const uri = row.getAttribute('data-uri') || '';
+      const kind = row.getAttribute('data-kind') || '';
+      if (!uri) return;
+
+      if (kind === 'file'){
+        vscode.postMessage({ type: 'open', uri });
+        return;
+      }
+
+      if (kind === 'folder' || kind === 'root'){
+        const node = nodes.get(uri);
+        if (!node) return;
+
+        const willOpen = !node.expanded;
+        node.expanded = willOpen;
+
+        if (willOpen) expanded.add(uri);
+        else expanded.delete(uri);
+
+        if (willOpen && node.children == null && !node.loading){
+          node.loading = true;
+          vscode.postMessage({ type: 'getChildren', uri });
+        }
+        render();
+        return;
+      }
+    });
+
+    document.getElementById('btnRefresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+    let filterTimer = null;
+
+    function postSearch(){
+      const q = (filter.value || '').trim();
+      if (!q){
+        // back to normal browsing: just refresh roots
+        vscode.postMessage({ type: 'refresh' });
+        return;
+      }
+      vscode.postMessage({ type: 'search', query: q, limit: 2000 });
+    }
+
+    filter.addEventListener('input', () => {
+      if (filterTimer) clearTimeout(filterTimer);
+      filterTimer = setTimeout(postSearch, 180);
+    });
+
+    // report webview errors to extension logs
+    window.addEventListener('error', (e) => {
+      vscode.postMessage({ type: 'clientError', text: e.message || 'Webview error', stack: e.error?.stack });
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const reason = e.reason?.message ? e.reason.message : String(e.reason);
+      vscode.postMessage({ type: 'clientError', text: reason || 'Unhandled rejection', stack: e.reason?.stack });
+    });
+
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'roots'){
+        nodes.clear();
+        rootUris = [];
+
+        const rows = msg.rows || [];
+        for (const r of rows){
+          upsertNode(r, null);
+          rootUris.push(r.uri);
+        }
+
+        applyExpanded();
+        render();
+        status.textContent = '';
+        return;
+      }
+
+      if (msg.type === 'children'){
+        const parent = msg.parent;
+        const parentNode = nodes.get(parent);
+        if (!parentNode) return;
+
+        parentNode.loading = false;
+
+        // If user is filtering, this is "search tree mode": auto-expand every parent we receive.
+        const q = (filter.value || '').trim();
+        if (q) {
+          parentNode.expanded = true;
+          expanded.add(parent);
+        }
+
+        const childRows = msg.rows || [];
+        const childUris = [];
+
+        for (const r of childRows){
+          const childNode = upsertNode(r, parent);
+          childUris.push(childNode.row.uri);
+        }
+
+        parentNode.children = childUris;
+
+        applyExpanded();
+        render();
+        return;
+      }
+
+      if (msg.type === 'status'){
+        status.textContent = msg.text || '';
+        return;
+      }
+
+      if (msg.type === 'error'){
+        status.textContent = 'Error: ' + (msg.text || '');
+        return;
+      }
+    });
+
+    vscode.postMessage({ type: 'ready' });
+  </script>
+</body>
+</html>

@@ -1,0 +1,1540 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Edit</title>
+  <style>
+    :root{
+      --pad: 10px;
+      --r: 10px;
+      --b: 1px solid var(--vscode-panel-border);
+      --muted: var(--vscode-descriptionForeground);
+      --bg: var(--vscode-editor-background);
+      --bg2: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      --fg: var(--vscode-foreground);
+      --mono: var(--vscode-editor-font-family);
+    }
+
+    body{ margin:0; padding: var(--pad); color: var(--fg); font-family: var(--vscode-font-family); }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+
+    .topbarLeft{
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .topbarRight{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .title{
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .topbarSep{
+      width: 1px;
+      height: 18px;
+      background: var(--vscode-panel-border);
+      opacity: 0.9;
+      margin: 0 6px;
+      flex: 0 0 auto;
+    }
+
+    .modePill{
+      display:flex;
+      align-items:center;
+      gap: 2px;
+      padding: 2px 2px;
+      border-radius: 4px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      background: var(--vscode-sideBar-background, var(--bg));
+      justify-content: space-between;
+    }
+
+    .modeLabel{
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .modeSelect{
+      height: 22px;
+      border-radius: 4px;
+      border: 1px solid var(--vscode-input-border);
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      padding: 2px 8px;
+    }
+
+    /* compact inline mode + tooltip-like hint */
+    .modeField{
+      position: relative;
+      display:flex;
+      align-items:center;
+    }
+    .modeHint{
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 10;
+      display:none;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      background: var(--vscode-editorWidget-background, var(--bg));
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+      max-width: 360px;
+      white-space: normal;
+      word-break: break-word;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+    }
+    .modeField:focus-within .modeHint{ display:block; }
+
+    /* Small screens: stack left/right cleanly */
+    @media (max-width: 560px){
+      .topbar{ flex-direction: column; align-items: stretch; }
+      .topbarLeft{ justify-content: space-between; }
+      .topbarRight{ justify-content: flex-start; }
+      .modePill{ align-self: flex-start; }
+    }
+
+    button{
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: 0;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select:none;
+    }
+    button.secondary{
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    button:disabled{ opacity: 0.45; cursor: default; }
+
+    textarea{
+      width:100%;
+      border-radius: 10px;
+      border: 1px solid var(--vscode-input-border);
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      padding: 8px;
+      box-sizing: border-box;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.35;
+      resize: vertical;
+    }
+
+    .status{
+      margin: 6px 0 10px 0;
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 16px;
+      white-space: pre-wrap;
+    }
+
+    .layout{
+      display:grid;
+      /* left panel can shrink; right panel keeps room */
+      grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 290px);
+      min-height: 260px;
+    }
+
+    /* only stack when it's actually tight */
+    @media (max-width: 200px){
+      .layout{ grid-template-columns: 1fr; height: auto; }
+    }
+
+    /* right panel header actions (compact) */
+    .panelHeader .hdrRow{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+    }
+    .panelHeader .hdrLeft{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .panelHeader .hdrTitle{
+      min-width:0;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .panelHeader .hdrActions{
+      display:flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content:flex-end;
+    }
+
+    button.mini{
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
+    .panel{
+      border: var(--b);
+      border-radius: var(--r);
+      overflow: hidden;
+      background: var(--bg);
+      display:flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .panelHeader{
+      padding: 8px 10px;
+      border-bottom: var(--b);
+      background: var(--bg2);
+      display:flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .panelBody{
+      padding: 8px 10px;
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .list{ display:flex; flex-direction:column; gap:6px; }
+
+    .item{
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 10px;
+      padding: 8px;
+      cursor: pointer;
+      user-select:none;
+    }
+    .item:hover{ background: var(--vscode-list-hoverBackground); }
+    .item.sel{ outline: 1px solid var(--vscode-focusBorder); }
+
+    .mono{ font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+    .small{ font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    .badgeRow{ display:flex; gap:6px; align-items:center; flex-wrap: wrap; margin-top: 4px; }
+    .badge{
+      font-size: 11px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      color: var(--muted);
+      user-select:none;
+    }
+    .badge.ok{ color: var(--vscode-testing-iconPassed); }
+    .badge.warn{ color: var(--vscode-editorWarning-foreground); }
+    .badge.bad{ color: var(--vscode-testing-iconFailed); }
+
+    .actionsCol{ display:flex; flex-direction: column; gap: 8px; padding: 10px; }
+    .note{ color: var(--muted); font-size: 11px; line-height: 1.3; margin-top: 6px; }
+
+    .history{
+      margin-top: 10px;
+      border: var(--b);
+      border-radius: var(--r);
+      overflow:hidden;
+      background: var(--bg);
+    }
+    .histHeader{
+      padding: 8px 10px;
+      border-bottom: var(--b);
+      background: var(--bg2);
+      font-size: 12px;
+      color: var(--muted);
+      display:flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .histGroup{
+      border-top: 3px solid var(--vscode-focusBorder);
+    }
+    .histGroup:first-child{ border-top: none; }
+
+    .groupTitle{
+      padding: 10px 10px;
+      background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+    }
+    .groupPrompt{ font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+    .groupMeta{ font-size: 11px; color: var(--muted); margin-top: 4px; display:flex; gap:10px; flex-wrap: wrap; }
+
+    .histBlock{ padding: 8px 10px; border-bottom: 1px solid var(--vscode-editorWidget-border); }
+    .histBlock:last-child{ border-bottom: none; }
+
+    .fileLine{
+      display:flex;
+      justify-content: space-between;
+      gap:10px;
+      padding: 4px 0;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .fileLine .right{ color: var(--muted); white-space: nowrap; }
+
+    .histRow{
+      display:flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 0;
+      border-top: 1px solid var(--vscode-editorWidget-border);
+      font-size: 12px;
+    }
+    .histRow:first-child{ border-top: none; }
+    .histLabel{ font-family: var(--mono); overflow:hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .histMeta{ color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+    .planCard{
+      border: var(--b);
+      border-radius: var(--r);
+      background: var(--bg);
+      padding: 10px;
+    }
+
+    .planTop{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .planTitle{ font-weight: 700; }
+    .planBadges{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+
+    .planGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .planBlock{
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 10px;
+      padding: 8px;
+      min-width: 0;
+    }
+
+    .planHdr{
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .planText{
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+
+    .kv{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .listBox{
+      margin-top: 8px;
+      border-top: 1px dashed var(--vscode-editorWidget-border);
+      padding-top: 8px;
+    }
+
+    .listBox .smallTitle{
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .ul{
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .issueRow{
+      padding: 6px 8px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 10px;
+      margin-top: 6px;
+    }
+
+    .issueRow .sev{
+      font-size: 11px;
+      font-family: var(--mono);
+      margin-bottom: 4px;
+    }
+
+    .busyChip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--vscode-editorWidget-border);
+      color: var(--muted);
+      font-size: 12px;
+      user-select:none;
+    }
+
+    .spin{
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      border: 2px solid var(--vscode-editorWidget-border);
+      border-top-color: transparent;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .sev.warn{ color: var(--vscode-editorWarning-foreground); }
+    .sev.error{ color: var(--vscode-testing-iconFailed); }
+  </style>
+</head>
+
+<body>
+  <div class="topbar">
+    <div class="topbarLeft">
+      <div class="title">Edit</div>
+      <div class="topbarSep" aria-hidden="true"></div>
+      <div id="busyChip" class="busyChip" style="display:none;">
+        <span class="spin" aria-hidden="true"></span>
+        <span>Busy</span>
+      </div>
+    </div>
+
+    <div class="topbarRight">
+      <div class="modePill" aria-label="Mode selector">
+        <div class="modeField">
+          <select id="modeSelect" class="modeSelect" aria-label="Mode">
+            <option value="plan">plan</option>
+            <option value="execute">execute</option>
+            <option value="auto">auto</option>
+          </select>
+          <div id="modeHint" class="modeHint" role="note">plan = propose only (safer)</div>
+        </div>
+      </div>
+      <div class="topbarSep" aria-hidden="true"></div>
+      <button id="btnRun">Run</button>
+      <button id="btnApplyAll" class="secondary">Apply all pending</button>
+      <button id="btnDiscardRun" class="secondary">Discard instruction</button>
+      <button id="btnClearView" class="secondary">Clear view</button>
+    </div>
+  </div>
+
+  <textarea id="prompt" style="min-height: 78px;" placeholder="Instruction: what should be changed across indexed (included) files?"></textarea>
+  <div class="status" id="status"></div>
+
+  <details id="planBox" style="margin: 6px 0 10px 0;" open>
+    <summary style="cursor:pointer; color: var(--muted);">Plan & validation</summary>
+
+    <div style="margin-top:8px; display:flex; flex-direction:column; gap:10px;">
+
+      <div id="planRich" class="planCard" style="display:none;">
+        <div class="planTop">
+          <div class="planTitle">Summary</div>
+          <div class="planBadges" id="planBadges"></div>
+        </div>
+
+        <div class="planGrid">
+          <div class="planBlock">
+            <div class="planHdr">Plan</div>
+            <div id="planMain" class="planText"></div>
+            <div id="planLists"></div>
+          </div>
+
+          <div class="planBlock">
+            <div class="planHdr">Validation</div>
+            <div id="valSummary" class="planText"></div>
+            <div id="valIssues"></div>
+          </div>
+        </div>
+      </div>
+
+      <details id="planRawBox">
+        <summary style="cursor:pointer; color: var(--muted);">Raw</summary>
+        <div style="margin-top:8px;">
+          <div class="small">Plan</div>
+          <pre id="planText" style="white-space: pre-wrap; font-family: var(--mono); font-size: 12px; border: var(--b); border-radius: 10px; padding: 8px; background: var(--bg);"></pre>
+          <div class="small" style="margin-top:10px;">Consistency</div>
+          <pre id="consistencyText" style="white-space: pre-wrap; font-family: var(--mono); font-size: 12px; border: var(--b); border-radius: 10px; padding: 8px; background: var(--bg);"></pre>
+        </div>
+      </details>
+
+    </div>
+  </details>
+
+  <div class="layout">
+    <div class="panel">
+      <div class="panelHeader"><div>Files</div></div>
+      <div class="panelBody">
+        <div id="fileList" class="list"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panelHeader">
+        <div class="hdrRow">
+          <div class="hdrLeft">
+            <div id="midTitle" class="mono hdrTitle">Changes</div>
+          </div>
+
+          <div class="hdrActions">
+            <button id="btnOpenFile" class="secondary mini" disabled>Open</button>
+            <button id="btnOpenDiff" class="secondary mini" disabled>Diff</button>
+            <button id="btnApply" class="mini" disabled>Apply</button>
+            <button id="btnDiscardChange" class="secondary mini" disabled>Discard</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panelBody">
+        <div id="changeList" class="list"></div>
+
+        <div style="margin-top: 10px; color: var(--muted); font-size: 12px;">Edit selected change (used for Apply)</div>
+        <textarea id="editText" style="min-height: 160px;" spellcheck="false"
+          placeholder="Select a change to edit… (multiline supported)"></textarea>
+
+        <div class="note">
+          Clicking a change opens the diff in the main editor. Editing here updates the proposed diff live (if open).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="history">
+    <div class="histHeader">
+      <div>History</div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <div style="font-size: 11px;">Rollback is sequential (newest active first)</div>
+        <button id="btnClearHistory" class="secondary mini">Clear history</button>
+      </div>
+    </div>
+    <div id="history"></div>
+  </div>
+
+  <script nonce="__NONCE__">
+  (function(){
+    function safeString(x){ return (x === undefined || x === null) ? "" : String(x); }
+
+    function esc(s){
+      s = safeString(s);
+      return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function clip(s, n){
+      var t = safeString(s);
+      return t.length > n ? (t.slice(0, n - 1) + "…") : t;
+    }
+
+    function fmtTime(ms){
+      try { return new Date(ms).toLocaleString(); } catch (e) { return safeString(ms); }
+    }
+
+    function safeJsonParse(s){
+      try { return JSON.parse(safeString(s)); } catch (e) { return null; }
+    }
+
+    function stripToJsonObject(text){
+      var t = String((text === undefined || text === null) ? "" : text);
+      var first = t.indexOf("{");
+      if (first < 0) return t.trim();
+      return t.slice(first).trim();
+    }
+
+    function parseConsistencyMaybe(text){
+      var raw = String((text === undefined || text === null) ? "" : text).trim();
+      if (!raw) return null;
+      var direct = safeJsonParse(raw);
+      if (direct) return direct;
+
+      // If it has a prefix like "Issues: N" before the JSON, strip to the first "{"
+      var stripped = stripToJsonObject(raw);
+      var again = safeJsonParse(stripped);
+      if (again) return again;
+
+      return null;
+    }
+
+    function countBySeverity(issues){
+      let warn = 0, error = 0;
+      for (const x of issues || []){
+        const sev = String(x?.severity || "").toLowerCase();
+        if (sev === "error") error++;
+        else if (sev === "warn" || sev === "warning") warn++;
+      }
+      return { warn, error };
+    }
+
+    function mustGet(id){
+      var el = document.getElementById(id);
+      if (!el) throw new Error("Edit webview: missing element #" + id);
+      return el;
+    }
+
+    function closestItem(el, selector){
+      while (el) {
+        if (el.matches && el.matches(selector)) return el;
+        el = el.parentElement;
+      }
+      return null;
+    }
+
+    function attrEncode(s){ return encodeURIComponent(safeString(s)); }
+    function attrDecode(s){
+      try { return decodeURIComponent(safeString(s)); }
+      catch (e) { return safeString(s); }
+    }
+
+    var vscode;
+    try {
+      vscode = acquireVsCodeApi();
+    } catch (e) {
+      // If this fails, nothing else will work. Show it loudly.
+      var s = document.getElementById("status");
+      if (s) s.textContent = "BOOT ERROR: acquireVsCodeApi() failed: " + (e && e.message ? e.message : String(e));
+      return;
+    }
+
+    function post(msg){
+      try { vscode.postMessage(msg); }
+      catch (e) {
+        var s = document.getElementById("status");
+        if (s) s.textContent = "postMessage failed: " + (e && e.message ? e.message : String(e));
+      }
+    }
+
+    window.addEventListener("error", function(e){
+      post({ type: "clientError", text: safeString(e && e.message ? e.message : "Webview error"), stack: e && e.error && e.error.stack ? String(e.error.stack) : undefined });
+    });
+
+    window.addEventListener("unhandledrejection", function(e){
+      var reason = e && e.reason && e.reason.message ? e.reason.message : safeString(e && e.reason ? e.reason : "Unhandled rejection");
+      post({ type: "clientError", text: reason, stack: e && e.reason && e.reason.stack ? String(e.reason.stack) : undefined });
+    });
+
+    var elPrompt = mustGet("prompt");
+    var elStatus = mustGet("status");
+
+    var fileList = mustGet("fileList");
+    var changeList = mustGet("changeList");
+    var midTitle = mustGet("midTitle");
+
+    var btnRun = mustGet("btnRun");
+    var btnApplyAll = mustGet("btnApplyAll");
+    var btnDiscardRun = mustGet("btnDiscardRun");
+    var btnClearView = mustGet("btnClearView");
+
+    var btnOpenFile = mustGet("btnOpenFile");
+    var btnOpenDiff = mustGet("btnOpenDiff");
+    var btnApply = mustGet("btnApply");
+    var btnDiscardChange = mustGet("btnDiscardChange");
+
+    var planText = mustGet("planText");
+    var consistencyText = mustGet("consistencyText");
+
+    var editText = mustGet("editText");
+    var historyEl = mustGet("history");
+    var btnClearHistory = mustGet("btnClearHistory");
+
+    var busyChip = mustGet("busyChip");
+
+    var state = { active: null, history: [] };
+
+    // UI-local busy that covers "we sent a command -> waiting for host ack".
+    // We do NOT trust host-provided `state.busy` because it can get stuck true.
+    var uiBusy = {
+      local: false,          // in-flight command flag (UI side)
+      kind: "",              // "run" | "cancel" | ... (optional bookkeeping)
+      sinceMs: 0,
+      cancelRequested: false, // user hit Stop during a run
+      forceIdle: false        // used to unlock UI on error even if stale state shows "planning"
+    };
+    var hostBusy = false;
+
+    var selectedFileUri = "";
+    var selectedChangeId = "";
+    var lastDiffKey = "";
+
+    var modeSelect = mustGet("modeSelect");
+    var modeHint = mustGet("modeHint");
+
+    var selectedMode = "plan";
+
+    function renderModeHint(){
+      var m = safeString(selectedMode);
+      modeHint.textContent =
+        (m === "execute") ? "execute = generate final edits (more decisive)" :
+        (m === "auto") ? "auto = decide per file (best-effort)" :
+        "plan = propose only (safer)";
+    }
+
+    // -------- Busy logic --------
+    // We derive "busy" from:
+    //  - uiBusy.local: UI-side in-flight command (request -> host ack)
+    //  - stateSuggestsBusy(): host state indicates work-in-progress (streaming-friendly)
+    // We intentionally ignore host `state.busy` because it can get stuck.
+
+    function stateSuggestsBusy(){
+      var a = state && state.active;
+      if (!a) return false;
+
+      // If your host sets a.status / a.phase, we honor it.
+      var aStatus = String(a.status || a.phase || "").toLowerCase();
+      if (aStatus === "planning" || aStatus === "running" || aStatus === "applying") return true;
+
+      // Streaming-friendly: mark busy if any file is still being processed.
+      var files = a.files || [];
+      for (var i = 0; i < files.length; i++){
+        var s = String(files[i].status || "").toLowerCase();
+        if (s === "planning" || s === "running" || s === "applying") return true;
+      }
+      return false;
+    }
+
+    function isBusy(){
+      if (uiBusy.forceIdle) return false;
+        return !!(
+          uiBusy.local ||
+          stateSuggestsBusy() ||
+          (hostBusy && state && state.active)   // <- key gating (won’t stick when active cleared)
+        );
+    }
+
+    // "Done" heuristic for run: once plan/validation summaries exist AND nothing is "planning".
+    function runLooksDone(){
+      if (!state || !state.active) return false;
+      if (stateSuggestsBusy()) return false;
+
+      var a = state.active;
+      return !!(safeString(a.planSummary || "").trim() || safeString(a.consistencySummary || "").trim());
+    }
+
+    function clearLocalBusy(){
+      uiBusy.local = false;
+      uiBusy.kind = "";
+      uiBusy.sinceMs = 0;
+      // NOTE: do NOT clear cancelRequested here; keep it until cancellation completes.
+    }
+
+    function clearBusyAll(){
+      uiBusy.local = false;
+      uiBusy.kind = "";
+      uiBusy.sinceMs = 0;
+      uiBusy.cancelRequested = false;
+    }
+
+    // Call this after receiving any fresh state from the host.
+    function reconcileLocalBusyAfterState(){
+      // fresh state means the host is alive again
+      uiBusy.forceIdle = false;
+
+      // ✅ If host says not busy and we don't see any "planning/running" markers, unlock UI.
+      if (uiBusy.local && !hostBusy && !stateSuggestsBusy()){
+        clearBusyAll();
+        return;
+      }
+
+      if (!uiBusy.local) return;
+
+      if (uiBusy.kind === "run"){
+        // Keep local busy until we see evidence the host started OR finished.
+        if (stateSuggestsBusy()){
+          clearLocalBusy(); // derived busy now covers the lock
+          return;
+        }
+        if (runLooksDone()){
+          clearBusyAll();
+          return;
+        }
+        // still waiting for host ack; keep uiBusy.local
+        return;
+      }
+
+      if (uiBusy.kind === "cancel"){
+        // Stop request: keep local busy until we see host stop (active cleared or finished).
+        if (stateSuggestsBusy()){
+          clearLocalBusy(); // still running; derived busy covers the lock
+          return;
+        }
+        if (!state.active || runLooksDone()){
+          clearBusyAll();
+          return;
+        }
+        return;
+      }
+
+      // Short operations: any new state means "done".
+      clearBusyAll();
+    }
+
+    function renderBusy(){
+      var b = isBusy();
+      busyChip.style.display = b ? "inline-flex" : "none";
+
+      // While busy, "Discard instruction" becomes Stop
+      btnDiscardRun.textContent = b ? (uiBusy.cancelRequested ? "Stopping…" : "Stop") : "Discard instruction";
+
+      // Lock textareas while busy
+      elPrompt.disabled = b;
+      editText.disabled = b;
+      modeSelect.disabled = b;
+    }
+
+    function setBusy(b, kind){
+      uiBusy.local = !!b;
+      uiBusy.kind = b ? safeString(kind || "") : "";
+      uiBusy.sinceMs = b ? Date.now() : 0;
+
+      if (!b) uiBusy.cancelRequested = false;
+
+      renderBusy();
+
+      if (b) applyBusyDisables();
+      else render();
+    }
+
+    function applyBusyDisables(){
+      var b = isBusy();
+      if (!b) return;
+
+      btnRun.disabled = true;
+      btnApplyAll.disabled = true;
+
+      // IMPORTANT: allow Stop while busy
+      btnDiscardRun.disabled = false;
+
+      btnClearView.disabled = true;
+
+      btnOpenFile.disabled = true;
+      btnOpenDiff.disabled = true;
+      btnApply.disabled = true;
+      btnDiscardChange.disabled = true;
+
+      btnClearHistory.disabled = true;
+    }
+
+    function findFile(){
+      var a = state.active;
+      if (!a) return null;
+      var files = a.files || [];
+      for (var i = 0; i < files.length; i++){
+        if (files[i].uri === selectedFileUri) return files[i];
+      }
+      return null;
+    }
+
+    function findChange(file){
+      if (!file) return null;
+      var changes = file.changes || [];
+      for (var i = 0; i < changes.length; i++){
+        if (changes[i].id === selectedChangeId) return changes[i];
+      }
+      return null;
+    }
+
+    function pickDefaults(){
+      var a = state.active;
+      if (!a) { selectedFileUri = ""; selectedChangeId = ""; return; }
+
+      var files = a.files || [];
+      var i;
+
+      var fileStillExists = false;
+      for (i = 0; i < files.length; i++){
+        if (files[i].uri === selectedFileUri) { fileStillExists = true; break; }
+      }
+      if (!selectedFileUri || !fileStillExists){
+        var preferred = null;
+        for (i = 0; i < files.length; i++){
+          if ((files[i].pending || 0) > 0) { preferred = files[i]; break; }
+        }
+        if (!preferred){
+          for (i = 0; i < files.length; i++){
+            if ((files[i].total || 0) > 0) { preferred = files[i]; break; }
+          }
+        }
+        if (!preferred && files.length) preferred = files[0];
+        selectedFileUri = preferred ? preferred.uri : "";
+      }
+
+      var f = findFile();
+      if (!f) { selectedChangeId = ""; return; }
+
+      var changes = f.changes || [];
+      var changeStillExists = false;
+      var curIdx = -1;
+      for (i = 0; i < changes.length; i++){
+        if (changes[i].id === selectedChangeId) { changeStillExists = true; curIdx = i; break; }
+      }
+
+      // If no selection (or vanished), pick first pending.
+      if (!selectedChangeId || !changeStillExists){
+        var preferredC = null;
+        for (i = 0; i < changes.length; i++){
+          if (!changes[i].applied && !changes[i].discarded) { preferredC = changes[i]; break; }
+        }
+        if (!preferredC && changes.length) preferredC = changes[0];
+        selectedChangeId = preferredC ? preferredC.id : "";
+        return;
+      }
+
+      // If the currently-selected change is now applied/discarded, jump to the NEXT pending change
+      // in the same file (wrap around). This makes Apply/Discard flow naturally.
+      var curC = changes[curIdx];
+      var curPending = curC && !curC.applied && !curC.discarded;
+      if (!curPending){
+        var next = null;
+        for (i = curIdx + 1; i < changes.length; i++){
+          if (!changes[i].applied && !changes[i].discarded) { next = changes[i]; break; }
+        }
+        if (!next){
+          for (i = 0; i < curIdx; i++){
+            if (!changes[i].applied && !changes[i].discarded) { next = changes[i]; break; }
+          }
+        }
+        if (next) selectedChangeId = next.id;
+      }
+    }
+
+    function selectionKey(){
+      return safeString(selectedFileUri) + "|" + safeString(selectedChangeId);
+    }
+
+    function maybeOpenDiffForSelection(){
+      if (isBusy()) return;
+      var f = findFile();
+      if (!f || !f.uri) return;
+      if (!(f.total > 0)) return;
+      if (!selectedChangeId) return;
+
+      var key = selectionKey();
+      if (key === lastDiffKey) return;
+      lastDiffKey = key;
+
+      post({ type: "openDiff", uri: f.uri, changeId: selectedChangeId });
+    }
+
+    function renderFiles(){
+      var a = state.active;
+      if (!a){
+        fileList.innerHTML = '<div class="small">No active instruction.</div>';
+        return;
+      }
+
+      var files = a.files || [];
+      if (!files.length){
+        fileList.innerHTML = '<div class="small">No files.</div>';
+        return;
+      }
+
+      var html = "";
+      for (var i = 0; i < files.length; i++){
+        var f = files[i];
+        var sel = (f.uri === selectedFileUri) ? " sel" : "";
+        var badges = [];
+
+        if ((f.pending || 0) > 0) badges.push('<span class="badge warn">pending: ' + esc(f.pending) + "</span>");
+        if ((f.applied || 0) > 0) badges.push('<span class="badge ok">applied: ' + esc(f.applied) + "</span>");
+        if ((f.discarded || 0) > 0) badges.push('<span class="badge">discarded: ' + esc(f.discarded) + "</span>");
+        if (f.status === "skipped") badges.push('<span class="badge">skipped</span>');
+        if (f.status === "planning") badges.push('<span class="badge warn">planning</span>');
+        if (f.status === "error") badges.push('<span class="badge bad">error</span>');
+
+        html += ''
+          + '<div class="item' + sel + '" data-uri="' + attrEncode(f.uri) + '" title="' + esc(f.rel) + '">'
+          + '  <div class="mono">' + esc(f.rel) + "</div>"
+          + '  <div class="badgeRow">' + badges.join("") + "</div>"
+          + (f.message ? ('<div class="small">' + esc(f.message) + "</div>") : "")
+          + "</div>";
+      }
+
+      fileList.innerHTML = html;
+    }
+
+    function renderChanges(){
+      var f = findFile();
+      if (!f){
+        changeList.innerHTML = '<div class="small">Select a file.</div>';
+        midTitle.textContent = "Changes";
+        btnOpenFile.disabled = true;
+        btnOpenDiff.disabled = true;
+        return;
+      }
+
+      midTitle.textContent = "Changes · " + safeString(f.rel || "");
+      btnOpenFile.disabled = false;
+      btnOpenDiff.disabled = !(f.total > 0 && !!selectedChangeId);
+
+      var changes = f.changes || [];
+      if (!changes.length){
+        changeList.innerHTML = '<div class="small">No changes for this file.</div>';
+        return;
+      }
+
+      var html = "";
+      for (var i = 0; i < changes.length; i++){
+        var c = changes[i];
+        var sel = (c.id === selectedChangeId) ? " sel" : "";
+        var title = "unit #" + (c.index + 1) + " [" + c.start + ".." + c.end + "]";
+
+        html += ''
+          + '<div class="item' + sel + '" data-change="' + attrEncode(c.id) + '" title="' + esc(title) + '">'
+          + '  <div class="mono">' + esc(title) + "</div>"
+          + (c.message ? ('<div class="small">' + esc(clip(c.message, 140)) + "</div>") : "")
+          + "</div>";
+      }
+
+      changeList.innerHTML = html;
+    }
+
+    function renderDetail(){
+      var f = findFile();
+      var c = f ? findChange(f) : null;
+
+      if (!c){
+        editText.value = "";
+        editText.placeholder = "Select a change to edit…";
+        btnApply.disabled = true;
+        btnDiscardChange.disabled = true;
+        return;
+      }
+
+      editText.placeholder = "";
+      editText.value = safeString(c.newText);
+
+      var canAct = !c.applied && !c.discarded;
+      btnApply.disabled = !canAct;
+      btnDiscardChange.disabled = !canAct;
+    }
+
+    function extractLastJsonObject(text){
+      var t = safeString(text);
+      if (!t) return null;
+
+      // Fast path: if the whole thing is JSON already
+      var direct = safeJsonParse(t.trim());
+      if (direct && typeof direct === "object") return direct;
+
+      // Try to locate the last JSON object embedded inside a larger string.
+      // We scan from the end, looking for '{', then attempt to parse a balanced {...}.
+      function tryParseBalancedFrom(s, start){
+        var depth = 0;
+        var inStr = false;
+        var escp = false;
+
+        for (var i = start; i < s.length; i++){
+          var ch = s[i];
+
+          if (inStr){
+            if (escp) { escp = false; continue; }
+            if (ch === "\\\\") { escp = true; continue; }
+            if (ch === '"') { inStr = false; continue; }
+            continue;
+          }
+
+          if (ch === '"') { inStr = true; continue; }
+          if (ch === "{") { depth++; continue; }
+          if (ch === "}") {
+            depth--;
+            if (depth === 0){
+              var slice = s.slice(start, i + 1).trim();
+              var obj = safeJsonParse(slice);
+              if (obj && typeof obj === "object") return obj;
+              return null;
+            }
+          }
+        }
+        return null;
+      }
+
+      for (var i = t.lastIndexOf("{"); i >= 0; i = t.lastIndexOf("{", i - 1)){
+        var parsed = tryParseBalancedFrom(t, i);
+        if (parsed) return parsed;
+      }
+
+      return null;
+    }
+
+    function renderPlanAndValidation(){
+      try {
+        var rich = document.getElementById("planRich");
+
+        if (state.active){
+          planText.textContent = safeString(state.active.planSummary || "");
+          var cs = safeString(state.active.consistencySummary || "");
+          var ic = state.active.issueCount || 0;
+          consistencyText.textContent = (ic ? ("Issues: " + ic + "\n\n") : "") + cs;
+        } else {
+          planText.textContent = "";
+          consistencyText.textContent = "";
+        }
+
+        if (!rich) return;
+
+        var badges = document.getElementById("planBadges");
+        var planMain = document.getElementById("planMain");
+        var planLists = document.getElementById("planLists");
+        var valSummary = document.getElementById("valSummary");
+        var valIssues = document.getElementById("valIssues");
+
+        if (!badges || !planMain || !planLists || !valSummary || !valIssues) return;
+
+        if (!state.active){
+          rich.style.display = "none";
+          badges.innerHTML = "";
+          planMain.textContent = "";
+          planLists.innerHTML = "";
+          valSummary.textContent = "";
+          valIssues.innerHTML = "";
+          return;
+        }
+
+        const consistencyObj = parseConsistencyMaybe(state.active.consistencySummary);
+        var planObj = extractLastJsonObject(state.active.planSummary);
+
+        var ps = safeString(state.active.planSummary || "");
+
+        // ----- badges -----
+        var b = [];
+
+        var mStatus = ps.match(/PLAN STATUS:\s*([a-z_]+)/i);
+        var planStatus = mStatus ? safeString(mStatus[1]).toLowerCase() : "";
+        if (planStatus){
+          var cls = (planStatus === "ok") ? "ok" : (planStatus === "need_input" ? "warn" : "bad");
+          b.push('<span class="badge ' + cls + '">plan: ' + esc(planStatus) + "</span>");
+        }
+
+        var mMode = ps.match(/MODE:\s*(plan|execute)/i);
+        if (mMode) b.push('<span class="badge">mode: ' + esc(mMode[1]) + "</span>");
+
+        var mUnits = ps.match(/UNITS:\s*(\d+)/i);
+        if (mUnits) b.push('<span class="badge">units: ' + esc(mUnits[1]) + "</span>");
+
+        var mTrace = ps.match(/TRACE FILE:\s*(.+)$/im);
+        if (mTrace) b.push('<span class="badge">trace: ' + esc(clip(mTrace[1], 36)) + "</span>");
+
+        var issues = (consistencyObj && Array.isArray(consistencyObj.issues)) ? consistencyObj.issues : [];
+        var sev = countBySeverity(issues);
+
+        if (sev.error) b.push('<span class="badge bad">errors: ' + esc(sev.error) + "</span>");
+        if (sev.warn) b.push('<span class="badge warn">warn: ' + esc(sev.warn) + "</span>");
+        if (!sev.error && !sev.warn && consistencyObj) b.push('<span class="badge ok">validation: clean</span>');
+
+        badges.innerHTML = b.join("");
+
+        // ----- plan side (v2 ChangeDescription) -----
+        if (planObj && typeof planObj === "object"){
+          var summary = safeString(planObj.summary || "").trim();
+          var desc = safeString(planObj.description || "").trim();
+
+          var text = "";
+          if (summary) text += summary;
+          if (summary && desc) text += "\n\n";
+          if (desc) text += desc;
+
+          planMain.textContent = text || "(no plan description)";
+
+          function addList(title, arr, maxItems){
+            if (!Array.isArray(arr) || !arr.length) return "";
+            var items = [];
+            for (var i = 0; i < Math.min(maxItems || 12, arr.length); i++){
+              items.push("<li>" + esc(arr[i]) + "</li>");
+            }
+            return ''
+              + '<div class="listBox">'
+              + '<div class="smallTitle">' + esc(title) + "</div>"
+              + '<ul class="ul">' + items.join("") + "</ul>"
+              + "</div>";
+          }
+
+          var listsHtml = "";
+          listsHtml += addList("Assumptions", planObj.assumptions, 12);
+          listsHtml += addList("Constraints", planObj.constraints, 12);
+          listsHtml += addList("Non-goals", planObj.nonGoals, 12);
+          listsHtml += addList("Acceptance criteria", planObj.acceptanceCriteria, 12);
+          listsHtml += addList("Risks", planObj.risks, 10);
+
+          planLists.innerHTML = listsHtml;
+        } else {
+          planMain.textContent = "Could not parse a structured plan. See Raw.";
+          planLists.innerHTML = "";
+        }
+
+        // ----- validation side -----
+        if (consistencyObj && typeof consistencyObj === "object"){
+          valSummary.textContent = safeString(consistencyObj.summary || "").trim() || "(no validation summary)";
+
+          var rows = "";
+          for (var ii = 0; ii < Math.min(50, issues.length); ii++){
+            var x = issues[ii] || {};
+            const sevRaw = String(x?.severity || "warn").toLowerCase();
+            const sevCls = (sevRaw === "error") ? "error" : "warn";
+            var rel = x.rel ? ("(" + safeString(x.rel).trim() + ") ") : "";
+            var msg = safeString(x.message || "").trim();
+            var sug = safeString(x.suggestion || "").trim();
+
+            rows += ''
+              + '<div class="issueRow">'
+              + '  <div class="sev ' + sevCls + '">' + esc(x.severity || "warn") + " " + esc(rel) + "</div>"
+              + '  <div class="planText">' + esc(msg) + "</div>"
+              + (sug ? ('<div class="kv">suggestion: <span>' + esc(sug) + "</span></div>") : "")
+              + "</div>";
+          }
+
+          valIssues.innerHTML = rows || '<div class="small">No issues.</div>';
+        } else {
+          valSummary.textContent = "Could not parse validation JSON. See Raw.";
+          valIssues.innerHTML =
+            '<div class="small">Raw excerpt:</div><div class="planText">' +
+            esc(clip(state.active.consistencySummary || "", 800)) +
+            "</div>";
+        }
+
+        rich.style.display = "block";
+      } catch (e) {
+        post({
+          type: "clientError",
+          text: "renderPlanAndValidation: " + (e && e.message ? e.message : String(e)),
+          stack: e && e.stack ? String(e.stack) : undefined
+        });
+      }
+    }
+
+    function renderHistory(){
+      var groups = state.history || [];
+      if (!groups.length){
+        historyEl.innerHTML = '<div class="histBlock"><div class="small">No history yet.</div></div>';
+        return;
+      }
+
+      var html = "";
+      for (var i = 0; i < groups.length; i++){
+        var g = groups[i] || {};
+
+        // Only reference closedReason if it exists in your stored history objects
+        var status = g.isActive ? "ACTIVE" : (g.closedReason ? safeString(g.closedReason).toUpperCase() : "CLOSED");
+
+        var meta = [
+          fmtTime(g.createdAtMs),
+          "status: " + status,
+          "changes: " + (g.totalChanges || 0) + " total",
+          "applied: " + (g.appliedChanges || 0),
+          "discarded: " + (g.discardedChanges || 0),
+          "pending: " + (g.pendingChanges || 0)
+        ].join(" · ");
+
+        var fileLines = "";
+        var files = g.files || [];
+        for (var j = 0; j < files.length; j++){
+          var f = files[j] || {};
+          var right =
+            "pending " + (f.pending || 0) + " (" + (f.pendingSegs || "—") + ") · " +
+            "discarded " + (f.discarded || 0) + " (" + (f.discardedSegs || "—") + ") · " +
+            "applied " + (f.applied || 0) + " (" + (f.appliedSegs || "—") + ")";
+
+          fileLines += ''
+            + '<div class="fileLine">'
+            + '  <div style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + esc(f.rel || "") + "</div>"
+            + '  <div class="right">' + esc(right) + "</div>"
+            + "</div>";
+        }
+
+        var stepsHtml = "";
+        var steps = g.steps || [];
+        for (var k = 0; k < steps.length; k++){
+          var s = steps[k] || {};
+          var canRollback = !isBusy() && !s.rolledBack; // robust default
+          var disableAttr = canRollback ? "" : "disabled";
+          var btn = '<button class="secondary" data-act="rollback" data-id="' + esc(s.id || "") + '" ' + disableAttr + '>Rollback</button>';
+
+          var label = safeString(s.label || "Step");
+          var fileCount = (s.fileCount != null) ? s.fileCount : 0;
+
+          stepsHtml += ''
+            + '<div class="histRow">'
+            + '  <div style="min-width:0;">'
+            + '    <div class="histLabel">' + esc(label) + (s.rolledBack ? " (rolled back)" : "") + "</div>"
+            + '    <div class="histMeta">' + esc(fmtTime(s.createdAtMs)) + " · files: " + esc(fileCount) + "</div>"
+            + "  </div>"
+            + "  <div>" + btn + "</div>"
+            + "</div>";
+        }
+
+        html += ''
+          + '<div class="histGroup">'
+          + '  <div class="groupTitle">'
+          + '    <div class="groupPrompt">' + esc(clip(g.prompt || "(no prompt)", 180)) + "</div>"
+          + '    <div class="groupMeta">' + esc(meta) + "</div>"
+          + "  </div>"
+          + '  <div class="histBlock">'
+          + '    <div class="small">Files with changes (pending/discarded/applied)</div>'
+          +      (fileLines || '<div class="small">—</div>')
+          + "  </div>"
+          + '  <div class="histBlock">'
+          + '    <div class="small">Apply / rollback steps</div>'
+          +      (stepsHtml || '<div class="small">No apply steps in this run.</div>')
+          + "  </div>"
+          + "</div>";
+      }
+
+      historyEl.innerHTML = html;
+    }
+
+    function render(){
+      pickDefaults();
+      renderFiles();
+      renderChanges();
+      renderDetail();
+      renderHistory();
+      renderPlanAndValidation();
+
+      var b = isBusy();
+
+      // ✅ FIX A: always re-derive Run enabled state
+      btnRun.disabled = b;
+
+      var enableApplyAll = false;
+      if (state.active && state.active.files){
+        for (var i = 0; i < state.active.files.length; i++){
+          if ((state.active.files[i].pending || 0) > 0) { enableApplyAll = true; break; }
+        }
+      }
+      btnApplyAll.disabled = !enableApplyAll;
+
+      btnDiscardRun.disabled = !(state.active || b);
+      btnClearView.disabled = !state.active;
+      btnClearHistory.disabled = !((state.history || []).length);
+
+      renderBusy();
+      applyBusyDisables();
+      maybeOpenDiffForSelection();
+    }
+
+    btnApply.addEventListener("click", function(){
+      if (isBusy()) return;
+      if (!selectedChangeId) return;
+      setBusy(true, "Applying change…");
+      post({ type: "applySelected", changeId: selectedChangeId, newText: safeString(editText.value || "") });
+    });
+
+    modeSelect.addEventListener("change", function(){
+      selectedMode = safeString(modeSelect.value || "plan").trim() || "plan";
+      renderModeHint();
+    });
+
+    btnApplyAll.addEventListener("click", function(){
+      if (isBusy()) return;
+      setBusy(true, "Applying all pending…");
+      post({ type: "applyAll" });
+    });
+
+    btnDiscardRun.addEventListener("click", function(){
+      // Allow even while busy: becomes Stop.
+      if (isBusy()){
+        if (uiBusy.cancelRequested) return; // don't spam
+        uiBusy.cancelRequested = true;
+        elStatus.textContent = "Stopping…";
+        // Reuse discardRun to avoid adding a new message type; host can treat this as cancel.
+        post({ type: "discardRun", cancel: true });
+        setBusy(false, "cancel");
+        return;
+      }
+
+      setBusy(false, "discardRun");
+      post({ type: "discardRun" });
+    });
+
+    btnClearView.addEventListener("click", function(){
+      if (isBusy()) return;
+      setBusy(false, "Clearing view…");
+      post({ type: "clearView" });
+    });
+
+    btnClearHistory.addEventListener("click", function(){
+      post({ type: "clearHistory" });
+    });
+
+    btnDiscardChange.addEventListener("click", function(){
+      if (isBusy()) return;
+      if (!selectedChangeId) return;
+      setBusy(false, "Discarding change…");
+      post({ type: "discardChange", changeId: selectedChangeId });
+    });
+
+    historyEl.addEventListener("click", function(e){
+      var btn = closestItem(e.target, 'button[data-act="rollback"]');
+      if (!btn) return;
+      if (isBusy()) return;
+      var id = btn.getAttribute("data-id");
+      if (!id) return;
+      setBusy(false, "Rolling back…");
+      post({ type: "rollback", stepId: id });
+    });
+
+
+    fileList.addEventListener("click", function(e){
+      if (isBusy()) return;
+      var row = closestItem(e.target, ".item[data-uri]");
+      if (!row) return;
+      selectedFileUri = attrDecode(row.getAttribute("data-uri") || "");
+      selectedChangeId = "";
+      lastDiffKey = "";
+      render();
+    });
+
+    changeList.addEventListener("click", function(e){
+      if (isBusy()) return;
+      var row = closestItem(e.target, ".item[data-change]");
+      if (!row) return;
+      selectedChangeId = attrDecode(row.getAttribute("data-change") || "");
+      render();
+    });
+
+    btnOpenFile.addEventListener("click", function(){
+      if (!selectedFileUri) return;
+      post({ type: "openFile", uri: selectedFileUri });
+    });
+
+    btnOpenDiff.addEventListener("click", function(){
+      if (isBusy()) return;
+      if (!selectedFileUri) return;
+      var cid = safeString(selectedChangeId || "");
+      post({ type: "openDiff", uri: selectedFileUri, changeId: cid || undefined });
+    });
+
+    var draftTimer = null;
+    editText.addEventListener("input", function(){
+      if (!selectedChangeId) return;
+
+      if (draftTimer) clearTimeout(draftTimer);
+      draftTimer = setTimeout(function(){
+        post({
+          type: "updateDraft",
+          changeId: selectedChangeId,
+          newText: safeString(editText.value || "")
+        });
+      }, 220);
+    });
+
+    btnRun.addEventListener("click", function(){
+      if (isBusy()) return;
+      var prompt = safeString(elPrompt.value || "").trim();
+      if (!prompt) { elStatus.textContent = "Prompt is empty."; return; }
+
+      elStatus.textContent = "Planning…";
+      setBusy(true, "run");
+      post({ type: "run", prompt: prompt, mode: safeString(selectedMode || "plan") });
+    });
+
+    // Boot markers + handshake
+    elStatus.textContent = "Edit webview JS running. Handshaking…";
+    post({ type: "clientLog", text: "Edit webview boot: JS running" });
+    post({ type: "ready" });
+    selectedMode = safeString(modeSelect.value || "plan").trim() || "plan";
+    renderModeHint();
+
+    window.addEventListener("message", function(event){
+      var msg = event.data;
+      console.log(`[editView] new message: ${JSON.stringify(msg)}`);
+      if (!msg || !msg.type) return;
+
+      if (msg.type === "status"){
+        elStatus.textContent = safeString(msg.text || "");
+        return;
+      }
+      if (msg.type === "clearHistory"){
+        elStatus.textContent = safeString(msg.text || "");
+        render();
+        return;
+      }
+      if (msg.type === "error"){
+        elStatus.textContent = "Error: " + safeString(msg.text || "");
+
+        // If the last known state still says "planning", unlock UI anyway.
+        uiBusy.forceIdle = true;
+        hostBusy = false; 
+        clearBusyAll();
+
+        render();
+        return;
+      }
+      if (msg.type === "state") {
+        // 1) normalize payload (host shape)
+        var p = msg.payload || { active: null, history: [], busy: false };
+
+        // 2) capture host busy (used only when state.active exists)
+        hostBusy = !!p.busy;
+
+        // 3) hydrate ONLY what our UI 'state' expects
+        state = {
+          active: p.active || null,
+          history: Array.isArray(p.history) ? p.history : []
+        };
+
+        // 4) keep prompt field sensible
+        if (!state.active) {
+          elPrompt.value = "";
+        } else if (state.active.prompt && !safeString(elPrompt.value || "").trim()) {
+          elPrompt.value = state.active.prompt;
+        }
+
+        // 5) reconcile local busy with new state (prevents stuck-busy)
+        reconcileLocalBusyAfterState();
+
+        // 6) selection-dependent UI bits
+        btnOpenFile.disabled = !selectedFileUri;
+
+        // 7) allow diff to re-open after finishing
+        if (!isBusy()) lastDiffKey = "";
+
+        render();
+        return;
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

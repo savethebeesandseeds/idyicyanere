@@ -1,0 +1,11 @@
+\documentclass{article}
+\begin{document}
+Add a mathematical equation at the end of each sentence $1+1=2$.
+Agrega una ecuación matemática al final de cada oración $1+1=2$.
+
+Also, ensure that the entire block of text is a valid LaTeX article document $a^2+b^2=c^2$.
+Además, asegúrate de que todo el bloque de texto sea un documento article válido de LaTeX $a^2+b^2=c^2$.
+
+This has changed because the sky is green $\int_0^1 x\,dx = \frac{1}{2}$.
+Esto ha cambiado porque el cielo es verde $\int_0^1 x\,dx = \frac{1}{2}$.
+\end{document}
