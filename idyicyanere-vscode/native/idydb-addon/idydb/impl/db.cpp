@@ -274,83 +274,80 @@ static int idydb_memfd_create_compat(const char* name, unsigned int flags)
 
 static FILE* idydb_secure_plain_stream(const char** out_kind)
 {
-	if (out_kind) *out_kind = "unknown";
+    if (out_kind) *out_kind = "unknown";
 
 #if defined(_WIN32)
-	{
-		/* Best-effort secure temp file:
-		 * - FILE_FLAG_DELETE_ON_CLOSE => removed automatically
-		 * - FILE_ATTRIBUTE_TEMPORARY  => hints caching
-		 * Not pure RAM, but practical and cross-platform for Windows.
-		 */
-		wchar_t tmpPath[MAX_PATH];
-		DWORD n = GetTempPathW(MAX_PATH, tmpPath);
-		if (n == 0 || n > MAX_PATH) return NULL;
+    {
+        /* Best-effort secure temp file on Windows */
+        wchar_t tmpPath[MAX_PATH];
+        DWORD n = GetTempPathW(MAX_PATH, tmpPath);
+        if (n == 0 || n > MAX_PATH) return NULL;
 
-		wchar_t tmpFile[MAX_PATH];
-		if (GetTempFileNameW(tmpPath, L"idy", 0, tmpFile) == 0) return NULL;
+        wchar_t tmpFile[MAX_PATH];
+        if (GetTempFileNameW(tmpPath, L"idy", 0, tmpFile) == 0) return NULL;
 
-		HANDLE h = CreateFileW(tmpFile,
-		                       GENERIC_READ | GENERIC_WRITE,
-		                       0, /* no sharing */
-		                       NULL,
-		                       CREATE_ALWAYS,
-		                       FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-		                       NULL);
-		if (h == INVALID_HANDLE_VALUE) {
-			DeleteFileW(tmpFile);
-			return NULL;
-		}
+        HANDLE h = CreateFileW(tmpFile,
+                               GENERIC_READ | GENERIC_WRITE,
+                               0, /* no sharing */
+                               NULL,
+                               CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                               NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+            DeleteFileW(tmpFile);
+            return NULL;
+        }
 
-		int fd = _open_osfhandle((intptr_t)h, _O_RDWR | _O_BINARY);
-		if (fd < 0) {
-			CloseHandle(h);
-			return NULL;
-		}
+        int fd = _open_osfhandle((intptr_t)h, _O_RDWR | _O_BINARY);
+        if (fd < 0) {
+            CloseHandle(h);
+            return NULL;
+        }
 
-		FILE* f = _fdopen(fd, "w+b");
-		if (!f) {
-			_close(fd); /* closes underlying handle too */
-			return NULL;
-		}
+        FILE* f = _fdopen(fd, "w+b");
+        if (!f) {
+            _close(fd); /* closes underlying handle too */
+            return NULL;
+        }
 
-		if (out_kind) *out_kind = "win32-temp-delete-on-close";
-		return f;
-	}
+        if (out_kind) *out_kind = "win32-temp-delete-on-close";
+        return f;
+    }
+#else
+  #ifdef __linux__
+    {
+        int fd = idydb_memfd_create_compat("idydb_plain", MFD_CLOEXEC);
+        if (fd >= 0) {
+            (void)fchmod(fd, 0600);
+            FILE* f = fdopen(fd, "w+b");
+            if (!f) { close(fd); return NULL; }
+            if (out_kind) *out_kind = "memfd";
+            return f;
+        }
+    }
+  #endif
+
+    /* POSIX fallback: shm_open + shm_unlink */
+    {
+        unsigned char rnd[16];
+        if (RAND_bytes(rnd, sizeof(rnd)) != 1) return NULL;
+
+        char name[64];
+        snprintf(name, sizeof(name),
+                 "/idydb_%02x%02x%02x%02x%02x%02x%02x%02x",
+                 rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7]);
+
+        int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd < 0) return NULL;
+
+        (void)shm_unlink(name);
+
+        FILE* f = fdopen(fd, "w+b");
+        if (!f) { close(fd); return NULL; }
+        if (out_kind) *out_kind = "shm";
+        return f;
+    }
 #endif
-
-#ifdef __linux__
-	{
-		int fd = idydb_memfd_create_compat("idydb_plain", MFD_CLOEXEC);
-		if (fd >= 0) {
-			(void)fchmod(fd, 0600);
-			FILE* f = fdopen(fd, "w+b");
-			if (!f) { close(fd); return NULL; }
-			if (out_kind) *out_kind = "memfd";
-			return f;
-		}
-	}
-#endif
-
-	{
-		unsigned char rnd[16];
-		if (RAND_bytes(rnd, sizeof(rnd)) != 1) return NULL;
-
-		char name[64];
-		snprintf(name, sizeof(name),
-		         "/idydb_%02x%02x%02x%02x%02x%02x%02x%02x",
-		         rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7]);
-
-		int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
-		if (fd < 0) return NULL;
-
-		(void)shm_unlink(name);
-
-		FILE* f = fdopen(fd, "w+b");
-		if (!f) { close(fd); return NULL; }
-		if (out_kind) *out_kind = "shm";
-		return f;
-	}
 }
 
 static int idydb_crypto_decrypt_locked_file_to_stream(FILE* in,

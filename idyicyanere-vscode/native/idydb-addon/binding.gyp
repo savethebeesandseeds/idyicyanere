@@ -32,31 +32,38 @@
           "include_dirs": [
             "<!@(node -p \"require('node-addon-api').include\")",
             "idydb/include",
-            "<!(echo ${OPENSSL_INCLUDE_DIR:-})"
+            "<!(node -p \"process.env.OPENSSL_INCLUDE_DIR || ''\")"
           ],
           "library_dirs": [
-            "<!(echo ${OPENSSL_LIB_DIR:-})"
+            "<!(node -p \"process.env.OPENSSL_LIB_DIR || ''\")"
           ]
         }],
 
         ["OS==\"win\"", {
           "defines": [
             "NOMINMAX",
-            "WIN32_LEAN_AND_MEAN"
+            "WIN32_LEAN_AND_MEAN",
+            "IDYDB_DISABLE_SHM=1"
           ],
           "msvs_settings": {
             "VCCLCompilerTool": {
-              "LanguageStandard": "stdcpp17"
+              "LanguageStandard": "stdcpp17",
+              "AdditionalOptions": [
+                "/std:c++17"
+              ]
             }
           },
           "include_dirs": [
             "<!@(node -p \"require('node-addon-api').include\")",
             "idydb/include",
-            "<!(echo %OPENSSL_INCLUDE_DIR%)"
+            "<!(node -p \"process.env.OPENSSL_INCLUDE_DIR || ''\")"
+          ],
+          "library_dirs": [
+            "<!(node -p \"process.env.OPENSSL_LIB_DIR || ''\")"
           ],
           "libraries": [
-            "<!(echo %OPENSSL_LIB_DIR%\\\\libssl.lib)",
-            "<!(echo %OPENSSL_LIB_DIR%\\\\libcrypto.lib)"
+            "libssl.lib",
+            "libcrypto.lib"
           ]
         }]
       ]

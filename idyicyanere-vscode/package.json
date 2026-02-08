@@ -6,6 +6,9 @@
   "publisher": "waajacu",
   "icon": "media/icon.png",
   "version": "0.3.0",
+  "license": "MIT",
+  "categories": ["Machine Learning", "Programming Languages", "Other"],
+  "keywords": ["ai", "assistant", "refactor", "code editing", "copilot", "llm", "openai"],
   "repository": {
     "type": "git",
     "url": "https://github.com/savethebeesandseeds/idyicyanere.git",
@@ -17,15 +20,20 @@
   "homepage": "https://github.com/savethebeesandseeds/idyicyanere#readme",
   "scripts": {
     "compile": "tsc -p .",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --minify --external:./native/*",
+    
+    "build:native": "node-gyp rebuild --directory native/idydb-addon",
+    "build:native:win": "node-gyp rebuild --directory native/idydb-addon --msvs_version=2022",
 
-    "vsix:clean": "node -e \"require('fs').rmSync('dist-vsix', {recursive:true, force:true}); require('fs').mkdirSync('dist-vsix', {recursive:true});\"",
-    "vsix:package": "node -e \"const {execSync}=require('child_process'); const out='dist-vsix/idyicyanere-'+process.platform+'-'+process.arch+'.vsix'; execSync('npx vsce package -o '+out,{stdio:'inherit'});\"",
+    "vsix:prepare": "node -e \"if (!require('fs').existsSync('dist-vsix')) require('fs').mkdirSync('dist-vsix', {recursive:true});\"",
+    
+    "vsix:clean:win": "node -e \"require('fs').rmSync('dist-vsix/idyicyanere-win32-x64.vsix', {force:true});\"",
+    "vsix:clean:linux": "node -e \"require('fs').rmSync('dist-vsix/idyicyanere-linux-x64.vsix', {force:true});\"",
 
-    "vsix:deps:dev": "npm ci",
-    "vsix:deps:prod": "npm ci --omit=dev",
+    "vsix:package": "node -e \"const {execSync}=require('child_process'); const out='dist-vsix/idyicyanere-'+process.platform+'-'+process.arch+'.vsix'; execSync('npx vsce package --no-dependencies -o '+out,{stdio:'inherit'});\"",
 
-    "vsix:linux:fast": "npm run vsix:clean && npm run vsix:deps:dev && npm run compile && npm run vsix:deps:prod && npm run vsix:package",
-    "vsix:local": "npm run vsix:clean && npm run vsix:deps:dev && npm run compile && npm run build:native && npm run vsix:deps:prod && npm run vsix:package"
+    "vsix:linux": "npm run vsix:prepare && npm run vsix:clean:linux && npm install && npm run bundle && npm run build:native && npm run vsix:package",
+    "vsix:win": "npm run vsix:prepare && npm run vsix:clean:win && npm install && npm run bundle && npm run build:native:win && npm run vsix:package"
   },
   "contributes": {
     "keybindings": [
@@ -88,6 +96,7 @@
     "openai": "^6.17.0"
   },
   "devDependencies": {
+    "esbuild": "^0.24.0",
     "@types/node": "^25.2.0",
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "^3.0.0",
@@ -96,12 +105,10 @@
     "typescript": "^5.9.3"
   },
   "files": [
-    "dist/**",
+    "dist/extension.js",
     "media/**",
-    "native/idydb-addon/build/Release/**/*",
-    "native/idydb-addon/idydb/include/**",
+    "native/idydb-addon/build/Release/idydb.node",
     "package.json",
-    "node_modules/**",
     "README.md",
     "LICENSE"
   ]
