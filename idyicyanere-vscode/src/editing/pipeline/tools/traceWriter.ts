@@ -1,4 +1,3 @@
-// src/editing/pipeline2/traceWriter.ts
 import * as vscode from "vscode";
 import { PlanChangesParams } from "./commons";
 

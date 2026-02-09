@@ -7,6 +7,11 @@ import { log } from "../logging/logger";
 import * as path from "path";
 import * as crypto from "crypto";
 
+// NEW: Imports for the chunking refactor
+import { ChunkingStrategy } from "./chunking/types";
+import { FixedChunker } from "./chunking/fixedChunker";
+import { LineChunker } from "./chunking/lineChunker";
+
 export type FileIndexStatus =
   | { kind: "not_indexed"; label: "not indexed"; icon: vscode.ThemeIcon }
   | { kind: "indexed"; label: "indexed"; icon: vscode.ThemeIcon }
@@ -17,6 +22,10 @@ export type FileIndexStatus =
 
 export class IndexService {
   private indexing = new Set<string>();
+
+  // NEW: Strategy instances
+  private fixedChunker = new FixedChunker();
+  private lineChunker = new LineChunker();
 
   getIndexingCount(): number {
     return this.indexing.size;
@@ -35,11 +44,20 @@ export class IndexService {
     return e.toLowerCase();
   }
 
-  private getChunkingForRel(rel: string): { method: "chars"; chunkChars: number } {
+  // NEW: Helper to resolve strategy + size from config
+  private getChunkerForRel(rel: string): { strategy: ChunkingStrategy; chunkChars: number } {
     const ext = this.normalizeExt(path.extname(rel));
     const byExt = this.config.data.indexing.chunking.byExtension;
-    const rule = ext && byExt[ext] ? byExt[ext] : this.config.data.indexing.chunking.default;
-    return { method: "chars", chunkChars: rule.chunkChars };
+
+    // Default config object
+    const rule = (ext && byExt[ext]) ? byExt[ext] : this.config.data.indexing.chunking.default;
+
+    // Heuristic: Use LineChunker (smart) for everything by default as it is safer for code.
+    // If you needed specific files to be fixed-width (e.g. .txt logs), you could add logic here.
+    return { 
+      strategy: this.lineChunker, 
+      chunkChars: rule.chunkChars 
+    };
   }
 
   getIndexedChunking(uri: vscode.Uri): { method: string; chunkChars: number } | undefined {
@@ -84,9 +102,10 @@ export class IndexService {
     this.indexing.add(key);
 
     const rel = vscode.workspace.asRelativePath(uri, false);
-    const chunking = this.getChunkingForRel(rel);
+    
+    const { strategy, chunkChars } = this.getChunkerForRel(rel);
 
-    log.info("IndexService.indexFile() start", { file: rel });
+    log.info("IndexService.indexFile() start", { file: rel, strategy: strategy.constructor.name });
 
     try {
       const stat = await vscode.workspace.fs.stat(uri);
@@ -146,8 +165,8 @@ export class IndexService {
         await this.store.deleteRows(old.rows);
       }
 
-      // NEW: clean chunks + structured offsets/lines
-      const pieces = chunkByCharsWithMeta(text, chunking.chunkChars);
+      // NEW: Use the strategy to chunk
+      const pieces = strategy.chunk(text, chunkChars);
 
       if (pieces.length === 0) {
         log.warn("Skipped (no chunks produced)", { file: rel });
@@ -157,7 +176,7 @@ export class IndexService {
 
       const chunks = pieces.map((p) => p.text);
 
-      log.debug("Chunked file", { file: rel, chunking, chunks: chunks.length });
+      log.debug("Chunked file", { file: rel, method: strategy.constructor.name, chunks: chunks.length });
 
       // sha256 hash of original bytes (stable, cheap)
       const fileHash = crypto.createHash("sha256").update(Buffer.from(bytes)).digest("hex");
@@ -173,7 +192,10 @@ export class IndexService {
 
       const rows = await this.store.insertChunksForFile(rel, chunks, embeddings, true, metas, fileHash);
 
-      this.manifest.set(key, { mtimeMs: stat.mtime, rows, chunking });
+      // Save chunking info to manifest so we know how it was processed
+      const chunkingInfo = { method: strategy.constructor.name, chunkChars };
+      
+      this.manifest.set(key, { mtimeMs: stat.mtime, rows, chunking: chunkingInfo });
       await this.manifest.save();
 
       log.info("IndexService.indexFile() complete", {
@@ -330,35 +352,4 @@ export class IndexService {
       vscode.window.showErrorMessage(`Purge failed: ${uri.fsPath}`);
     }
   }
-}
-
-function countNewlines(s: string): number {
-  let n = 0;
-  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++; // '\n'
-  return n;
-}
-
-function chunkByCharsWithMeta(
-  s: string,
-  size: number
-): Array<{ text: string; start: number; end: number; startLine: number; endLine: number }> {
-  const out: Array<{ text: string; start: number; end: number; startLine: number; endLine: number }> = [];
-  if (!s || size <= 0) return out;
-
-  let line = 1;
-
-  for (let i = 0; i < s.length; i += size) {
-    const chunk = s.slice(i, i + size);
-    const start = i;
-    const end = i + chunk.length;
-    const startLine = line;
-    const nl = countNewlines(chunk);
-    const endLine = startLine + nl;
-
-    out.push({ text: chunk, start, end, startLine, endLine });
-
-    line = endLine; // next chunk begins after this chunk's newlines
-  }
-
-  return out;
 }

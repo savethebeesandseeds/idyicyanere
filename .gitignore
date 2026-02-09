@@ -1,6 +1,6 @@
 parse_temp.txt
 parse_context.sh
-test_file_*.txt
+test_file_*
 
 .local.env
 

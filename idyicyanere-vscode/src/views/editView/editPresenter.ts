@@ -1,4 +1,4 @@
-import { ProposedFile } from "../../editing/editTypes";
+import { ProposedFile } from "../../editing/pipeline/tools/types";
 import { ApplyStep, EditState, RunRecord } from "./editState";
 import { ActiveRunOut, RunHistoryOut } from "./editTypes";
 import { fmtSegList } from "./editUtils";

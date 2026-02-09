@@ -1,153 +1,6 @@
-// src/editing/pipeline2/commons.ts
-import * as vscode from "vscode";
 import { ConfigService } from "../../storage/configService";
-import { OpenAIService } from "../../openai/openaiService";
-import { ProposedFile, ConsistencyIssue } from "../editTypes";
 import { clampInt } from "./utils";
 
-export type RagHit = {
-  rel: string;
-  start: number;
-  end: number;
-  score?: number;
-  text?: string;
-  startLine?: number;
-  endLine?: number;
-  fileHash?: string;
-  chunkHash?: string;
-};
-
-export type RagStoreLike = {
-  queryHits?: (qVec: Float32Array, k: number, metric: any, opts?: { rel?: string }) => Promise<RagHit[]>;
-};
-
-export type IncludedFile = { uri: vscode.Uri; rel: string; chunkChars: number };
-
-export type ReadTextFileResult =
-  | { ok: true; text: string }
-  | { ok: false; reason: string };
-
-export type PlanMode = "plan" | "execute" | "auto";
-
-export type PlanChangesParams = {
-  prompt: string;
-  mode?: PlanMode;
-  files: IncludedFile[];
-  readTextFile: (uri: vscode.Uri) => Promise<ReadTextFileResult>;
-  openai: OpenAIService;
-  config: ConfigService;
-  ragStore?: RagStoreLike;
-  onStatus?: (text: string) => void;
-  onFileResult?: (index: number, pf: ProposedFile) => void;
-};
-
-// -------- Planner v2 core types --------
-
-export type ChangeDescription = {
-  summary: string;
-  description: string;
-  assumptions?: string[];
-  constraints?: string[];
-  nonGoals?: string[];
-  acceptanceCriteria?: string[];
-  risks?: string[];
-};
-
-export type UnitChange = {
-  id: string;
-  title: string;
-  instructions: string;
-  fileHints?: string[];
-  anchors?: string[];
-  acceptanceCriteria?: string[];
-};
-
-export type UnitSplitOut = {
-  summary: string;
-  units: UnitChange[];
-};
-
-export type UnitTarget = {
-  unitId: string;
-  rel: string;
-  uri: string;
-  start: number;
-  end: number;
-  why: string;
-  score?: number;
-};
-
-export type ApplyCheckFile = {
-  rel: string;
-  uri: string;
-  ok: boolean;
-  appliedChangeIds: string[];
-  afterTextChars: number;
-  afterTextHash: string;
-  issues: ConsistencyIssue[];
-};
-
-export type ApplyCheckReport = {
-  ok: boolean;
-  summary: string;
-  files: ApplyCheckFile[];
-  issues: ConsistencyIssue[];
-};
-
-export type Planner2Config = {
-  trace: { enabled: boolean };
-
-  models: {
-    modelLight: string;
-    modelHeavy: string;
-    modelSuperHeavy: string;
-  };
-
-  parallel: {
-    unitChanges: number;
-    files: number;
-  };
-
-  rag: {
-    enabled: boolean;
-    k: number;
-    metric: any;
-  };
-
-  segmentation: {
-    newlineSnap: boolean;
-    newlineSnapWindow: number;
-    newlinePreferForward: boolean;
-    minFragmentChars: number;
-    maxFragmentChars: number;
-    contextChars: number;
-  };
-
-  targeting: {
-    useRagHits: boolean;
-    maxCandidateFiles: number;
-    padBeforeChars: number;
-    padAfterChars: number;
-    mergeGapChars: number;
-    maxWindowsPerUnit: number;
-  };
-
-  attempts: {
-    maxRounds: number;
-    validateModel: "light" | "heavy";
-  };
-
-  guards: {
-    discardWhitespaceOnlyChanges: boolean;
-    preserveLineEndings: boolean;
-    maxPatchCoverageWarn: number;
-    maxPatchCoverageError: number;
-  };
-
-  validation: {
-    final: "off" | "light" | "heavy";
-  };
-};
 
 function asBool(x: any, def: boolean): boolean {
   if (typeof x === "boolean") return x;
@@ -180,7 +33,7 @@ function asFinalValidation(x: any, def: "off" | "light" | "heavy"): "off" | "lig
   return def;
 }
 
-export function loadPlanner2Config(config: ConfigService): Planner2Config {
+export function loadPlannerConfig(config: ConfigService): PlannerConfig {
   const anyCfg = config?.data as any;
 
   const openaiCfg = anyCfg?.openai ?? {};
@@ -197,11 +50,11 @@ export function loadPlanner2Config(config: ConfigService): Planner2Config {
   const validationCfg = editCfg?.validation ?? {};
 
   const heavyFallback =
-    String(openaiCfg?.chatModelHeavy ?? openaiCfg?.chatModel ?? openaiCfg?.model ?? "").trim() || "gpt-4o";
+    String(openaiCfg?.modelHeavy ?? "").trim() || "review-idyicyanere-config-models-error";
   const lightFallback =
-    String(openaiCfg?.chatModelLight ?? openaiCfg?.chatModel ?? openaiCfg?.model ?? "").trim() || heavyFallback;
+    String(openaiCfg?.modelLight ?? "").trim() || heavyFallback;
   const superHeavyFallback =
-    String(openaiCfg?.chatModelSuperHeavy ?? openaiCfg?.chatModelHeavy ?? openaiCfg?.chatModel ?? openaiCfg?.model ?? "").trim() ||
+    String(openaiCfg?.modelSuperHeavy ?? "").trim() ||
     heavyFallback;
 
   const modelLight = String(modelsCfg?.modelLight ?? "").trim() || lightFallback;

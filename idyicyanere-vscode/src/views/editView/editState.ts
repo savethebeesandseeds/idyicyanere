@@ -1,5 +1,5 @@
 // src/views/editView/editState.ts
-import { ConsistencyIssue, ProposedFile } from "../../editing/editTypes";
+import { ConsistencyIssue, ProposedFile } from "../../editing/pipeline/tools/types";
 export type CloseReason = "discarded" | "superseded" | "completed" | "cleared";
 
 export type PlannerTelemetry = {

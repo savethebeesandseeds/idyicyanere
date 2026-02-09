@@ -114,7 +114,7 @@ export class OpenAIService {
     return t.slice(start);
   }
 
-  async completeJson<T>(
+  async language_request_with_JSON_out<T>(
     params: {
       input: string;
       instructions: string;
@@ -125,195 +125,34 @@ export class OpenAIService {
   ): Promise<T> {
     const t0 = Date.now();
     const client = await this.getClient();
-
-    const sys = (this.config.data.chatContext?.system ?? []).filter(Boolean);
-    const agent = (this.config.data.chatContext?.agent ?? []).filter(Boolean);
-    const agentBlock = agent.length ? `AGENT GUIDANCE:\n${agent.join("\n")}\n\n` : "";
-
     const model = this.getChatModel(params.modelKind ?? "default", params.modelOverride);
-    // Default to 2 => up to 3 total attempts (initial + 2 repairs)
-    const maxRetries = Math.max(0, Math.trunc(params.maxRetries ?? 2));
+    const maxRetries = Math.max(1, Math.trunc(params.maxRetries ?? 2));
 
     let lastErr: any = null;
-    let lastRaw = "";
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const retryInstr =
-          attempt === 0
-            ? ""
-            : [
-                "IMPORTANT:",
-                "Your previous output was invalid JSON and could not be parsed.",
-                "Return ONLY corrected valid JSON that matches the required schema.",
-                "No markdown, no commentary, no leading/trailing text."
-              ].join("\n");
-
-        const prev = attempt > 0 && lastRaw
-          ? [
-              "",
-              "PREVIOUS_INVALID_OUTPUT (for repair):",
-              "<<<",
-              lastRaw.slice(0, 6000),
-              ">>>"
-            ].join("\n")
-          : "";
+        const retryInstr = attempt === 0 ? "" : `\n[Try again: Respond with a valid JSON that matches the specified schema]\nCAREFULL WITH: ${lastErr}\n`;
 
         const resp = await client.responses.create({
           model,
-          instructions: [...sys, params.instructions, retryInstr].filter(Boolean).join("\n\n"),
-          input: `${agentBlock}${params.input}${prev}`
+          instructions: [...params.instructions, retryInstr].filter(Boolean).join("\n\n"),
+          input: params.input
         });
 
-        const raw = resp.output_text ?? "";
-        lastRaw = raw;
+        const raw = resp.output_text;
         const jsonText = this.extractFirstJsonBlock(raw);
         const parsed = JSON.parse(jsonText) as T;
 
-        log.debug("OpenAI completeJson ok", { model, ms: Date.now() - t0, chars: jsonText.length, attempt });
+        log.debug("[language_request_with_JSON_out] OpenAI completeJson ok", { model, ms: Date.now() - t0, chars: jsonText.length, attempt});
         return parsed;
       } catch (err: any) {
         lastErr = err;
-        log.warn("OpenAI completeJson parse/retry", { model, attempt, msg: err?.message ?? String(err) });
+        log.warn("[language_request_with_JSON_out] OpenAI failed to parse JSON: ", { model, attempt, msg: err?.message ?? String(err) });
       }
     }
-    log.caught("OpenAIService.completeJson", lastErr);
+    log.caught("[language_request_with_JSON_out] OpenAIService.language_request_with_JSON_out", lastErr);
     throw lastErr ?? new Error("completeJson failed");
   }
 
-  /**
-   * Single-file editor.
-   * Returns full updated file contents (plain text).
-   *
-   * NOTE: Intentionally simple; later you can switch to structured diffs / tool calls.
-   */
-  async editFile(prompt: string, rel: string, currentText: string, modelOverride?: string): Promise<string> {
-    const t0 = Date.now();
-    const client = await this.getClient();
-    const model = this.getChatModel("default", modelOverride);
-
-    const sys = (this.config.data.chatContext?.system ?? []).filter(Boolean);
-    const agent = (this.config.data.chatContext?.agent ?? []).filter(Boolean);
-
-    const instructions = [
-      ...sys,
-      "You are an automated code editor running inside a VS Code extension.",
-      "You will be given a USER PROMPT and a single TARGET FILE with its CURRENT CONTENT.",
-      "Return ONLY the full updated file contents as plain text.",
-      "Do NOT include Markdown, code fences (```), JSON, or commentary.",
-      "If no changes are needed, return the original content exactly."
-    ].join("\n\n");
-
-    const agentBlock = agent.length ? `AGENT GUIDANCE:\n${agent.join("\n")}\n\n` : "";
-    const input =
-      `${agentBlock}USER PROMPT:\n${prompt}\n\n` +
-      `TARGET FILE: ${rel}\n\n` +
-      `CURRENT CONTENT:\n<<<\n${currentText}\n>>>`;
-
-    const resp = await client.responses.create({ model, instructions, input });
-    const raw = resp.output_text ?? "";
-    const cleaned = this.stripFirstMarkdownFence(raw);
-
-    log.debug("OpenAI editFile response", {
-      model,
-      rel,
-      outputChars: cleaned.length,
-      ms: Date.now() - t0
-    });
-
-    return cleaned;
-  }
-
-  /**
-   * Segment editor: returns ONLY the updated segment text (not a full file).
-   * This enables per-file sub-changes (hunks/segments).
-   */
-  async editFragment(
-    prompt: string,
-    rel: string,
-    fragmentLabel: string,
-    fragmentText: string,
-    beforeContext: string,
-    afterContext: string, 
-    modelOverride?: string
-  ): Promise<string> {
-    const t0 = Date.now();
-    const client = await this.getClient();
-    const model = this.getChatModel("default", modelOverride);
-
-    const sys = (this.config.data.chatContext?.system ?? []).filter(Boolean);
-    const agent = (this.config.data.chatContext?.agent ?? []).filter(Boolean);
-
-    const instructions = [
-      ...sys,
-      "You are an automated code editor running inside a VS Code extension.",
-      "You will be given a USER PROMPT and a FRAGMENT of a file.",
-      "Return ONLY the updated FRAGMENT text as plain text.",
-      "Do NOT include markdown, code fences, JSON, or commentary.",
-      "Do NOT repeat the before/after context. Only output the fragment.",
-      "If no changes are needed, return the fragment exactly as-is."
-    ].join("\n\n");
-
-    const agentBlock = agent.length ? `AGENT GUIDANCE:\n${agent.join("\n")}\n\n` : "";
-
-    const input =
-      `${agentBlock}USER PROMPT:\n${prompt}\n\n` +
-      `TARGET FILE: ${rel}\n` +
-      `FRAGMENT: ${fragmentLabel}\n\n` +
-      `BEFORE CONTEXT (read-only):\n<<<\n${beforeContext}\n>>>\n\n` +
-      `FRAGMENT TEXT (edit this):\n<<<\n${fragmentText}\n>>>\n\n` +
-      `AFTER CONTEXT (read-only):\n<<<\n${afterContext}\n>>>`;
-
-    const resp = await client.responses.create({ model, instructions, input });
-    const raw = resp.output_text ?? "";
-    const cleaned = this.stripFirstMarkdownFence(raw);
-
-    log.debug("OpenAI editFragment response", {
-      model,
-      rel,
-      fragmentLabel,
-      outputChars: cleaned.length,
-      ms: Date.now() - t0
-    });
-
-    return cleaned;
-  }
-
-  async answerWithContext(question: string, context: string, modelOverride?: string): Promise<string> {
-    const t0 = Date.now();
-
-    try {
-      const client = await this.getClient();
-      const model = this.getChatModel("default", modelOverride);
-
-      log.debug("OpenAI responses request", {
-        model,
-        questionChars: question?.length ?? 0,
-        contextChars: context?.length ?? 0
-      });
-
-      const sys = (this.config.data.chatContext?.system ?? []).filter(Boolean);
-      const agent = (this.config.data.chatContext?.agent ?? []).filter(Boolean);
-
-      const instructions = [ ...sys ].join("\n\n");
-
-      const agentBlock = agent.length ? `AGENT GUIDANCE:\n${agent.join("\n")}\n\n` : "";
-
-      const resp = await client.responses.create({
-        model,
-        instructions,
-        input: `${agentBlock}CONTEXT:\n${context}\n\nQUESTION:\n${question}`
-      });
-
-      log.debug("OpenAI responses response", {
-        model,
-        outputChars: (resp.output_text ?? "").length,
-        ms: Date.now() - t0
-      });
-
-      return resp.output_text ?? "";
-    } catch (err) {
-      log.caught("OpenAIService.answerWithContext", err);
-      throw err;
-    }
-  }
+  /* other language_request where not needed */
 }

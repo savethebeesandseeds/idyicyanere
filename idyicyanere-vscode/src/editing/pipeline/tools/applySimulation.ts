@@ -1,6 +1,5 @@
-// src/editing/pipeline2/applySimulation.ts
-import { ProposedChange, ConsistencyIssue } from "../editTypes";
-import { normalizeRel } from "./utils";
+import { ProposedChange, ConsistencyIssue } from "./types";
+import { normalizeRel } from "../utils";
 
 export function applyChangesDeterministic(params: {
   rel: string;

@@ -1,4 +1,5 @@
-// src/editing/pipeline2/utils.ts
+import * as vscode from "vscode";
+import { promises as fs } from "fs";
 
 export type ResolvedMode = "plan" | "execute";
 
@@ -21,22 +22,57 @@ export function resolveMode(mode: any, prompt: string): ResolvedMode {
     "apply this patch",
     "apply exactly",
     "exactly",
-    "do not plan",
-    "only change",
-    "in file",
-    "file:",
-    "path:",
-    "rename ",
-    "replace ",
-    "delete ",
-    "insert ",
-    "move ",
+    "do not plan"
   ];
 
   if (hasDiff) return "execute";
   if (execHints.some((h) => p.includes(h))) return "execute";
   return "plan";
 }
+
+
+export async function buildFilesContext(files: Array<{ rel: string; uri: string }>): Promise<{
+  filesList: string[];
+  filesContent: string;
+}> {
+  const normalized = (files ?? []).map((f, i) => ({
+    rel: String(f?.rel ?? "").trim(),
+    uri: String(f?.uri ?? "").trim(),
+    i,
+  }));
+
+  const filesList = normalized.map((f) => f.rel).filter(Boolean);
+
+  const blocks = await Promise.all(
+    normalized.map(async ({ rel, uri, i }) => {
+      if (!rel) throw new Error(`buildFilesContext: missing rel at index ${i}`);
+      if (!uri) throw new Error(`buildFilesContext: missing uri for ${rel} (index ${i})`);
+
+      let fsPath: string;
+      try {
+        fsPath = vscode.Uri.parse(uri).fsPath;
+      } catch (e: any) {
+        throw new Error(`buildFilesContext: invalid uri for ${rel}: ${uri}\n${String(e?.message ?? e)}`);
+      }
+
+      let content: string;
+      try {
+        content = await fs.readFile(fsPath, "utf8");
+      } catch (e: any) {
+        throw new Error(`buildFilesContext: failed to read ${rel} (${fsPath})\n${String(e?.message ?? e)}`);
+      }
+
+      return `===== FILE: ${rel} =====\n${content.trimEnd()}\n`;
+    })
+  );
+
+  return {
+    filesList,
+    filesContent: blocks.join("\n"),
+  };
+}
+
+
 
 export function normalizeRel(rel: string): string {
   return String(rel ?? "").replace(/\\/g, "/").trim();

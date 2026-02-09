@@ -1,6 +1,5 @@
-// src/editing/pipeline2/pipeline.ts
 import { log } from "../../logging/logger";
-import { ProposedFile, ConsistencyIssue, ProposedChange } from "../editTypes";
+import { ProposedFile, ConsistencyIssue, ProposedChange } from "./tools/types";
 
 import {
   ApplyCheckReport,
@@ -8,15 +7,15 @@ import {
   IncludedFile,
   PlanChangesParams,
   UnitChange,
-  loadPlanner2Config
-} from "./commons";
+  loadPlannerConfig
+} from "./tools/commons";
 
 import { PlannerTraceCollector } from "./trace";
 import { writeReasoningTraceFile } from "./traceWriter";
-import { buildChangeDescription } from "./phaseA_changeDescription";
-import { splitIntoUnits } from "./phaseA_unitSplit";
-import { runUnitChange, UnitResult } from "./unitRunner";
-import { finalizeFile, FileUnitSummary } from "./fileFinalizer";
+import { runBuilPlan } from "./phaseA_planning";
+import { runSplitUnits } from "./phaseB_unitChanges";
+import { runUnitChange, UnitResult } from "./phaseC_unitRunner";
+import { runFinalizeFile, FileUnitSummary } from "./phaseD_fileFinalizer";
 
 import { errMsg, normalizeRel, resolveMode, runPool, sevRank, ResolvedMode } from "./utils";
 
@@ -60,7 +59,7 @@ export async function planChanges(params: PlanChangesParams): Promise<{
   const t0 = Date.now();
   await params.config.ensure();
 
-  const cfg = loadPlanner2Config(params.config);
+  const cfg = loadPlannerConfig(params.config);
   const mode = resolveMode(params.mode, params.prompt);
   const status = (s: string) => params.onStatus?.(s);
 
@@ -158,7 +157,6 @@ export async function planChanges(params: PlanChangesParams): Promise<{
   });
 
   const units: UnitChange[] = await splitIntoUnits({
-    prompt,
     changeDescription,
     cfg,
     openai: params.openai,

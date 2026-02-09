@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { log } from "../../logging/logger";
 import { ProposedContentProvider } from "../../editing/proposedContentProvider";
-import { ProposedChange, ProposedFile } from "../../editing/editTypes";
+import { ProposedChange, ProposedFile } from "../../editing/pipeline/tools/types";
 import { ApplyStep, ApplyStepFile, RunRecord } from "./editState";
 import { EditHost } from "./editHost";
 import { makeId } from "./editUtils";

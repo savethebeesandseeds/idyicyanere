@@ -1,9 +1,8 @@
-// src/editing/pipeline2/fileFinalizer.ts
 import { OpenAIService } from "../../openai/openaiService";
-import { ConsistencyIssue, ProposedChange, ProposedFile } from "../editTypes";
-import { ApplyCheckFile, Planner2Config } from "./commons";
+import { ConsistencyIssue, ProposedChange, ProposedFile } from "./tools/types";
+import { ApplyCheckFile, PlannerConfig } from "./commons";
 import { PROMPT_FILE_VALIDATE } from "./prompts";
-import { applyChangesDeterministic } from "./applySimulation";
+import { applyChangesDeterministic } from "./tools/applySimulation";
 import {
   convertLineEndings,
   detectDominantLineEnding,
@@ -37,7 +36,7 @@ function dedupeIssues(issues: ConsistencyIssue[]): ConsistencyIssue[] {
 }
 
 export async function finalizeFile(params: {
-  cfg: Planner2Config;
+  cfg: PlannerConfig;
   userPrompt: string;
   rel: string;
   uri: string;
@@ -147,7 +146,7 @@ export async function finalizeFile(params: {
       const modelKind = semanticMode === "heavy" ? "heavy" : "light";
       const modelOverride = semanticMode === "heavy" ? cfg.models.modelHeavy : cfg.models.modelLight;
 
-      const val = await params.openai.completeJson<any>({
+      const val = await params.openai.language_request_with_JSON_out<any>({
         modelKind,
         modelOverride,
         instructions: PROMPT_FILE_VALIDATE,

@@ -1,4 +1,3 @@
-// src/editing/pipeline2/trace.ts
 import { previewHeadTail } from "./utils";
 
 export type PlannerTraceStep = {

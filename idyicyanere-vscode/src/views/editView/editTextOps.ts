@@ -1,4 +1,4 @@
-import { ProposedFile, ProposedChange } from "../../editing/editTypes";
+import { ProposedFile, ProposedChange } from "../../editing/pipeline/tools/types";
 
 export type TextEol = "\n" | "\r\n";
 

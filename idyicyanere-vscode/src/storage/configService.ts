@@ -33,11 +33,6 @@ export interface ChunkingRule {
   chunkChars: number;
 }
 
-export interface ChatContextConfig {
-  system: string[];
-  agent: string[];
-}
-
 export interface ContextDumpConfig {
   dirName: string;
   latestFileName: string;
@@ -132,7 +127,6 @@ export interface AppConfig {
     };
   };
 
-  chatContext: ChatContextConfig;
   contextDump: ContextDumpConfig;
 
   editPlanner: EditPlannerConfig;
@@ -211,8 +205,6 @@ const DEFAULT_CONFIG: AppConfig = {
       byExtension: {}
     }
   },
-
-  chatContext: { system: [], agent: [] },
 
   contextDump: {
     dirName: "context_dumps",
@@ -480,10 +472,6 @@ export class ConfigService {
         out.indexing.chunking.byExtension[ext] = { method: "chars", chunkChars };
       }
     }
-
-    // chatContext
-    out.chatContext.system = toStringArray(raw?.chatContext?.system);
-    out.chatContext.agent = toStringArray(raw?.chatContext?.agent);
 
     // contextDump
     out.contextDump.dirName = safeName(raw?.contextDump?.dirName, DEFAULT_CONFIG.contextDump.dirName);

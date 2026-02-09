@@ -1,6 +1,5 @@
-// src/editing/pipeline2/targeting.ts
 import { OpenAIService } from "../../openai/openaiService";
-import { IncludedFile, Planner2Config, RagHit, RagStoreLike, ReadTextFileResult, UnitChange, UnitTarget } from "./commons";
+import { IncludedFile, PlannerConfig, RagHit, RagStoreLike, ReadTextFileResult, UnitChange, UnitTarget } from "./commons";
 import {
   clampInt,
   normalizeRel,
@@ -22,7 +21,7 @@ function buildUnitQueryText(unit: UnitChange, userPrompt: string): string {
   return bits.filter(Boolean).join("\n");
 }
 
-function pickFragmentSize(cfg: Planner2Config, f: IncludedFile): number {
+function pickFragmentSize(cfg: PlannerConfig, f: IncludedFile): number {
   const hinted = Math.trunc(Number(f.chunkChars ?? 0)) || cfg.segmentation.maxFragmentChars;
   return Math.max(cfg.segmentation.minFragmentChars, Math.min(cfg.segmentation.maxFragmentChars, hinted));
 }
@@ -84,7 +83,7 @@ function snapEndToNewline(text: string, end: number, window: number): number {
   return end;
 }
 
-function padAndSnapRegion(cfg: Planner2Config, text: string, start: number, end: number): { start: number; end: number } {
+function padAndSnapRegion(cfg: PlannerConfig, text: string, start: number, end: number): { start: number; end: number } {
   const len = text.length;
 
   const padBefore = Math.max(0, cfg.targeting.padBeforeChars);
@@ -104,7 +103,7 @@ function padAndSnapRegion(cfg: Planner2Config, text: string, start: number, end:
 }
 
 export async function pickTargetForUnit(params: {
-  cfg: Planner2Config;
+  cfg: PlannerConfig;
   unit: UnitChange;
   userPrompt: string;
   files: IncludedFile[];

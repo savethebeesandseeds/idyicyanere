@@ -1,7 +1,6 @@
-// src/editing/pipeline2/unitRunner.ts
 import { OpenAIService } from "../../openai/openaiService";
-import { ConsistencyIssue, ProposedChange } from "../editTypes";
-import { ChangeDescription, IncludedFile, Planner2Config, RagStoreLike, ReadTextFileResult, UnitChange, UnitTarget } from "./commons";
+import { ConsistencyIssue, ProposedChange } from "./tools/types";
+import { ChangeDescription, IncludedFile, PlannerConfig, RagStoreLike, ReadTextFileResult, UnitChange, UnitTarget } from "./commons";
 import { PROMPT_UNIT_VALIDATE } from "./prompts";
 import { pickTargetForUnit } from "./targeting";
 import {
@@ -26,70 +25,6 @@ export type UnitResult = {
   ok: boolean;
   attempts: number;
 };
-
-function buildUnitEditPrompt(params: {
-  mode: ResolvedMode;
-  userPrompt: string;
-  changeDescription?: ChangeDescription | null;
-  unit: UnitChange;
-  attempt: number;
-  issues?: ConsistencyIssue[];
-}): string {
-  const blocks: string[] = [];
-
-  blocks.push(`MODE: ${String(params.mode ?? "").toUpperCase()}`);
-  blocks.push("");
-
-  blocks.push("REQUEST:");
-  blocks.push(String(params.userPrompt ?? "").trim());
-
-  if (params.mode === "plan" && params.changeDescription) {
-    blocks.push("");
-    blocks.push("PLAN_JSON:");
-    blocks.push(JSON.stringify({
-      summary: params.changeDescription.summary ?? "",
-      description: params.changeDescription.description ?? "",
-      assumptions: params.changeDescription.assumptions ?? undefined,
-      constraints: params.changeDescription.constraints ?? undefined,
-      nonGoals: params.changeDescription.nonGoals ?? undefined,
-      acceptanceCriteria: params.changeDescription.acceptanceCriteria ?? undefined,
-      risks: params.changeDescription.risks ?? undefined
-    }, null, 2));
-  }
-
-  blocks.push("");
-  blocks.push("UNIT_JSON:");
-  blocks.push(JSON.stringify({
-    id: params.unit.id,
-    title: params.unit.title,
-    instructions: params.unit.instructions,
-    fileHints: params.unit.fileHints ?? undefined,
-    anchors: params.unit.anchors ?? undefined,
-    acceptanceCriteria: params.unit.acceptanceCriteria ?? undefined
-  }, null, 2));
-
-  blocks.push("");
-  blocks.push("EDIT CONTRACT (STRICT):");
-  blocks.push("- You will be provided a code FRAGMENT plus read-only surrounding context.");
-  blocks.push("- Modify ONLY the fragment. Treat surrounding context as immutable reference.");
-  blocks.push("- Make the smallest change that satisfies UNIT_JSON.instructions.");
-  blocks.push("- Do NOT introduce unrelated refactors, renames, reformatting, or style-only changes.");
-  blocks.push("- Preserve indentation, whitespace conventions, and line endings unless the request explicitly asks for formatting.");
-  blocks.push("- Do not add placeholders, TODOs, or commented-out code unless explicitly required by the unit.");
-  blocks.push("- If you cannot confidently implement the unit within the fragment WITHOUT GUESSING about unseen code, output the fragment EXACTLY unchanged.");
-  blocks.push("- Output MUST be ONLY the updated fragment text. No markdown, no explanations, no headings.");
-
-  if (params.attempt > 0 && params.issues?.length) {
-    blocks.push("");
-    blocks.push(`REVISION_NOTES_${params.attempt}:`);
-    for (const iss of params.issues.slice(0, 30)) {
-      const sug = iss.suggestion ? ` | suggestion: ${String(iss.suggestion).trim()}` : "";
-      blocks.push(`- [${iss.severity}] ${String(iss.message).trim()}${sug}`);
-    }
-  }
-
-  return blocks.join("\n");
-}
 
 function toSemanticIssues(rel: string, raw: any): ConsistencyIssue[] {
   const issues = Array.isArray(raw?.issues) ? raw.issues : [];
@@ -116,7 +51,7 @@ function clampRange(start: number, end: number, len: number): { start: number; e
 }
 
 export async function runUnitChange(params: {
-  cfg: Planner2Config;
+  cfg: PlannerConfig;
   mode: ResolvedMode;
   userPrompt: string;
   changeDescription: ChangeDescription | null;
@@ -211,7 +146,7 @@ export async function runUnitChange(params: {
 
     for (let round = 0; round < params.cfg.attempts.maxRounds; round++) {
       attempts = round + 1;
-
+...
       const prompt = buildUnitEditPrompt({
         mode: params.mode,
         userPrompt: params.userPrompt,
@@ -283,7 +218,7 @@ export async function runUnitChange(params: {
           params.cfg.attempts.validateModel === "heavy" ? params.cfg.models.modelHeavy : params.cfg.models.modelLight;
         const validateModelKind = params.cfg.attempts.validateModel === "heavy" ? "heavy" : "light";
 
-        const val = await params.openai.completeJson<any>({
+        const val = await params.openai.language_request_with_JSON_out<any>({
           modelKind: validateModelKind,
           modelOverride: validateModelOverride,
           instructions: PROMPT_UNIT_VALIDATE,

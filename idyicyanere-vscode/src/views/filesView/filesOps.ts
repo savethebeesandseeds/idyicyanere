@@ -26,20 +26,14 @@ async function sendRoots(host: FilesHost, deps: FilesDeps): Promise<void> {
   const rows: NodeRow[] = [];
 
   for (const f of folders) {
-    let rootStatus: StatusKind | undefined;
-    try {
-      rootStatus = await computeFolderStatusRecursive(deps, f.uri, 4000);
-    } catch (err) {
-      log.caught("computeFolderStatusRecursive(root)", err);
-      rootStatus = "error";
-    }
-
+    // PERFORMANCE FIX: Removed recursive status calculation (computeFolderStatusRecursive).
+    // Previously, this caused a deep FS scan for every root, delaying startup.
     rows.push({
       kind: "root",
       uri: f.uri.toString(),
       name: f.name,
       rel: normalizeRel(f.name),
-      status: rootStatus,
+      status: undefined, // Status is undefined (no badge) for performance
     });
   }
 
@@ -214,20 +208,14 @@ async function listChildren(deps: FilesDeps, dir: vscode.Uri): Promise<NodeRow[]
     if (isExcludedRel(rel, excluded)) continue;
 
     if (type === vscode.FileType.Directory) {
-      let folderStatus: StatusKind | undefined;
-      try {
-        folderStatus = await computeFolderStatusRecursive(deps, child, 4000);
-      } catch (err) {
-        log.caught("computeFolderStatusRecursive", err);
-        folderStatus = "error";
-      }
-
+      // PERFORMANCE FIX: Removed recursive status calculation.
+      // Previously, listing children would recursively scan every subfolder found.
       rows.push({
         kind: "folder",
         uri: child.toString(),
         name,
         rel,
-        status: folderStatus, // aggregated recursive status (may be undefined for empty)
+        status: undefined, // No aggregated recursive status (much faster)
       });
       continue;
     }
@@ -304,80 +292,7 @@ async function collectFilesRecursive(deps: FilesDeps, baseUri: vscode.Uri, limit
   return out;
 }
 
-function foldAggStatus(
-  cur: { seenIndexed: boolean; seenHidden: boolean },
-  st: StatusKind
-): { seenIndexed: boolean; seenHidden: boolean; done?: StatusKind } {
-  // priority: error > indexing > stale > hidden > indexed > not_indexed
-  if (st === "error") return { ...cur, done: "error" };
-  if (st === "indexing") return { ...cur, done: "indexing" };
-  if (st === "stale") return { ...cur, done: "stale" };
-
-  if (st === "indexed") cur.seenIndexed = true;
-  if (st === "hidden") cur.seenHidden = true;
-
-  return cur;
-}
-
-function finalizeAggStatus(cur: { seenIndexed: boolean; seenHidden: boolean }, sawAnyFile: boolean): StatusKind | undefined {
-  if (!sawAnyFile) return undefined; // empty folder: no hint
-  if (cur.seenHidden && !cur.seenIndexed) return "hidden";
-  if (cur.seenIndexed) return "indexed";
-  return "not_indexed";
-}
-
-async function computeFolderStatusRecursive(
-  deps: FilesDeps,
-  baseUri: vscode.Uri,
-  limit = 4000
-): Promise<StatusKind | undefined> {
-  await deps.config.ensure();
-
-  const excluded = deriveExcludedSegments(deps.config.data.indexing.excludeGlobs);
-
-  let sawAnyFile = false;
-  let agg = { seenIndexed: false, seenHidden: false };
-
-  const walk = async (dir: vscode.Uri) => {
-    if (limit <= 0) return;
-
-    let entries: [string, vscode.FileType][];
-    try {
-      entries = await vscode.workspace.fs.readDirectory(dir);
-    } catch {
-      return;
-    }
-
-    for (const [name, type] of entries) {
-      if (limit <= 0) return;
-
-      const child = vscode.Uri.joinPath(dir, name);
-      const rel = normalizeRel(vscode.workspace.asRelativePath(child, false));
-      if (isExcludedRel(rel, excluded)) continue;
-
-      if (type === vscode.FileType.Directory) {
-        await walk(child);
-        continue;
-      }
-
-      if (type === vscode.FileType.File) {
-        limit--;
-        sawAnyFile = true;
-
-        // ask indexer for file status (may stat internally; OK for expanded listings)
-        const st = await deps.indexer.getStatus(child);
-        agg = foldAggStatus(agg, st.kind as StatusKind);
-
-        if ((agg as any).done) return; // early exit for high-priority states
-      }
-    }
-  };
-
-  await walk(baseUri);
-
-  const done = (agg as any).done as StatusKind | undefined;
-  return done ?? finalizeAggStatus(agg, sawAnyFile);
-}
+// NOTE: calculateFolderStatusRecursive was removed as it was the primary cause of UI latency.
 
 async function runFolderBatch(host: FilesHost, deps: FilesDeps, folderUri: vscode.Uri, wantIndex: boolean): Promise<void> {
   const baseRel = vscode.workspace.asRelativePath(folderUri, false);
