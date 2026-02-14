@@ -11,13 +11,29 @@ import {
   computeTextFinal,
   detectEol,
   normalizeEol,
+  computeTextPreviewThrough,
   normalizeFileChangeEols,
-  validateProposedFile
+  validateProposedFile,
+  sortChanges
 } from "./editTextOps";
+import { errMsg } from "../../editing/pipeline/tools/utils";
 
 export type ApplyDeps = {
   proposedProvider: ProposedContentProvider;
 };
+
+function lockInfo(file: ProposedFile, changeId: string): { locked: boolean; reason?: string } {
+  const ordered = sortChanges(file);
+  const idx = ordered.findIndex((c) => c.id === changeId);
+  if (idx < 0) return { locked: false };
+  for (let i = 0; i < idx; i++) {
+    const c = ordered[i];
+    if (!c.applied && !c.discarded) {
+      return { locked: true, reason: "Apply/discard earlier changes in this file first." };
+    }
+  }
+  return { locked: false };
+}
 
 function ensureBaselineOrError(host: EditHost, file: ProposedFile, action: string): boolean {
   if (file.oldText === undefined) {
@@ -71,12 +87,33 @@ function makeStep(run: RunRecord, label: string): ApplyStep {
 function upsertProposed(deps: ApplyDeps, run: RunRecord, file: ProposedFile): void {
   const proposedUri = deps.proposedProvider.makeUri(run.id, file.rel);
   // Default to "current" so we never accidentally render *all* pending diffs.
-  deps.proposedProvider.set(proposedUri, computeTextCurrent(file));
+  try {
+    deps.proposedProvider.set(proposedUri, computeTextCurrent(file));
+  } catch {
+    deps.proposedProvider.set(proposedUri, String(file.oldText ?? ""));
+  }
 }
 
-function upsertProposedPreview(deps: ApplyDeps, run: RunRecord, file: ProposedFile, changeId: string): void {
+function upsertProposedPreview(
+  deps: ApplyDeps,
+  run: RunRecord,
+  file: ProposedFile,
+  changeId: string,
+  overrideNewText?: string
+): { ok: boolean; err?: string } {
   const proposedUri = deps.proposedProvider.makeUri(run.id, file.rel);
-  deps.proposedProvider.set(proposedUri, computeTextAfterApplyingOne(file, changeId));
+  try {
+    deps.proposedProvider.set(proposedUri, computeTextPreviewThrough(file, changeId, overrideNewText));
+    return { ok: true };
+  } catch (e: any) {
+    // While typing/patching, diffs can be temporarily invalid. Fallback to current.
+    try {
+      deps.proposedProvider.set(proposedUri, computeTextCurrent(file));
+    } catch {
+      deps.proposedProvider.set(proposedUri, String(file.oldText ?? ""));
+    }
+    return { ok: false, err: errMsg(e) };
+  }
 }
 
 function lastActiveStepIndex(steps: ApplyStep[]): number {
@@ -224,6 +261,23 @@ export async function handleClearView(host: EditHost): Promise<void> {
   await host.sendState();
 }
 
+export async function handleOpenTrace(host: EditHost, deps: ApplyDeps, uriStr: string): Promise<void> {
+  const _uriStr = String(uriStr ?? "").trim();
+
+  if (!_uriStr) {
+    host.ui({ type: "status", text: "No trace file available for this run." });
+    return;
+  }
+
+  try {
+    const u = vscode.Uri.parse(_uriStr);
+    const doc = await vscode.workspace.openTextDocument(u);
+    await vscode.window.showTextDocument(doc, { preview: false });
+  } catch (e) {
+    host.ui({ type: "status", text: `Failed to open trace: ${String((e as any)?.message ?? e)}` });
+  }
+}
+
 export async function handleOpenDiff(host: EditHost, deps: ApplyDeps, uriStr: string, changeId?: string): Promise<void> {
   const run = host.getActiveRun();
   if (!run) return;
@@ -282,19 +336,18 @@ export async function handleUpdateDraft(
   // Keep proposed text normalized and stable for diffs.
   normalizeFileChangeEols(file);
 
-  // Normalize EOL to baseline to prevent line-ending diffs and later apply mismatches.
-  const eol = detectEol(file.oldText ?? "");
-  ch.newText = normalizeEol(String(newText ?? ""), eol);
+  // Diff queue mode: newText is a unified diff patch.
+  ch.newText = String(newText ?? "");
 
-  // Only notify UI once per change (avoids spamming sendState on every keystroke).
-  const wasEdited = ch.message === "Edited";
-  if (!wasEdited) ch.message = "Edited";
-
-  // Keep diff preview focused on ONLY this selected change.
-  upsertProposedPreview(deps, run, file, changeId);
+  // Update preview. If invalid, mark gently (no loud errors).
+  const prevMsg = String(ch.message ?? "");
+  const res = upsertProposedPreview(deps, run, file, changeId, ch.newText);
+  const nextMsg = res.ok ? "Edited" : "Edited (invalid diff)";
+  const msgChanged = prevMsg !== nextMsg;
+  ch.message = nextMsg;
   host.scheduleSave();
 
-  if (!wasEdited) {
+  if (msgChanged && !prevMsg.startsWith("Edited")) {
     await host.sendState();
   }
 }
@@ -315,6 +368,12 @@ export async function handleDiscardChange(
   }
 
   const { file, ch } = r;
+
+  const lock = lockInfo(file, changeId);
+  if (lock.locked) {
+    host.ui({ type: "error", text: lock.reason ?? "This change is locked." }, "discardChange/locked");
+    return;
+  }
 
   if (ch.applied) {
     host.ui({ type: "error", text: "Already applied. Roll back first." }, "discardChange/alreadyApplied");
@@ -353,6 +412,12 @@ export async function handleApplySelected(
 
   if (!ensureBaselineOrError(host, file, "apply")) return;
 
+  const lock = lockInfo(file, changeId);
+  if (lock.locked) {
+    host.ui({ type: "error", text: lock.reason ?? "This change is locked." }, "applySelected/locked");
+    return;
+  }
+
   if (ch.applied) {
     host.ui({ type: "error", text: "Already applied." }, "applySelected/alreadyApplied");
     return;
@@ -365,20 +430,9 @@ export async function handleApplySelected(
   // Normalize file-level EOL first (for stable expectedBefore computations).
   normalizeFileChangeEols(file);
 
-  // Store edited text (normalized) on the change.
-  const eol = detectEol(file.oldText ?? "");
-  ch.newText = normalizeEol(String(newText ?? ""), eol);
+  // Store edited diff patch on the change.
+  ch.newText = String(newText ?? "");
   ch.message = "Edited";
-
-  const integrity = validateProposedFile(file);
-  const fatal = integrity.filter((x) => x.severity === "error");
-  if (fatal.length) {
-    host.ui(
-      { type: "error", text: `Cannot apply: proposal integrity failed.\n- ${fatal.map((x) => x.message).join("\n- ")}` },
-      "applySelected/integrity"
-    );
-    return;
-  }
 
   const stepLabel = `Apply: ${file.rel} (unit #${ch.index + 1})`;
   const statusLabel = `Applying ${file.rel} (unit #${ch.index + 1})…`;
@@ -386,8 +440,15 @@ export async function handleApplySelected(
   await host.withBusy("EditApply.handleApplySelected", statusLabel, async () => {
     await host.ensure_index();
 
-    const expectedBefore = computeTextCurrent(file);
-    const afterText = computeTextAfterApplyingOne(file, changeId, ch.newText);
+    let expectedBefore: string;
+    let afterText: string;
+    try {
+      expectedBefore = computeTextCurrent(file);
+      afterText = computeTextAfterApplyingOne(file, changeId, ch.newText);
+    } catch (e: any) {
+      host.ui({ type: "error", text: `Cannot apply: ${errMsg(e)}` }, "applySelected/computeFailed");
+      return;
+    }
 
     // Transactionally replace the whole file.
     const uri = vscode.Uri.parse(file.uri);
@@ -449,17 +510,17 @@ export async function handleApplyAll(host: EditHost, deps: ApplyDeps): Promise<v
 
       normalizeFileChangeEols(f);
 
-      const integrity = validateProposedFile(f);
-      const fatal = integrity.filter((x) => x.severity === "error");
-      if (fatal.length) {
-        throw new Error(`Cannot apply all: integrity failed for ${f.rel}. Re-run Plan changes.`);
-      }
-
       const pending = (f.changes ?? []).filter((c:any) => !c.discarded && !c.applied);
       const appliedIds = pending.map((c:any) => c.id);
 
-      const expectedBefore = computeTextCurrent(f);
-      const afterText = computeTextFinal(f);
+      let expectedBefore: string;
+      let afterText: string;
+      try {
+        expectedBefore = computeTextCurrent(f);
+        afterText = computeTextFinal(f);
+      } catch (e: any) {
+        throw new Error(`Cannot apply all: ${f.rel} patch sequence does not apply.\n${errMsg(e)}`);
+      }
 
       ops.push({
         uri: vscode.Uri.parse(f.uri),

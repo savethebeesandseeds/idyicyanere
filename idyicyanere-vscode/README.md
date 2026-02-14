@@ -16,8 +16,17 @@ chmod +x setup-linux.sh
 ./setup-linux.sh
 ```
 # build the app in Windows
+
+First start a container, to avoid installing a lot of things in the host
 ```PowerShell
-./win-setup.ps1
+cd /path/to/idyicyanere-vscode
+docker run --rm -it --name idyicyanere_win -v "%cd%:C:\idyicyanere" -w "C:\idyicyanere" mcr.microsoft.com/windows/servercore:ltsc2022 powershell
+docker exec -it idyicyanere_win powershell
+```
+
+Now inside the docker make the installation
+```PowerShell
+.\win-setup.ps1
 ```
 
 # Install the App
@@ -26,3 +35,4 @@ In VS Code: press Ctrl+Shift+P → run "Extensions: Install from VSIX…" → pi
 ```
 code --install-extension dist-vsix\idyicyanere-win32-x64.vsix
 ```
+

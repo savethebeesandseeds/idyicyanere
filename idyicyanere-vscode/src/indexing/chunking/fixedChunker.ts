@@ -22,7 +22,13 @@ export class FixedChunker implements ChunkingStrategy {
       // If the chunk ended with a newline, the next chunk starts on the next line
       // If it split in the middle of a line, the next chunk starts on the same line (technically)
       // But for simple slicing, we just accumulate the lines found.
-      line = endLine; 
+      out.push({ text: chunkText, start, end, startLine, endLine });
+
+      // If this chunk ended with '\n', next chunk starts on the next line.
+      // Otherwise it continues on the same line number.
+      const endsWithNl = chunkText.length > 0 && chunkText.charCodeAt(chunkText.length - 1) === 10;
+      line = endLine + (endsWithNl ? 1 : 0);
+
     }
 
     return out;

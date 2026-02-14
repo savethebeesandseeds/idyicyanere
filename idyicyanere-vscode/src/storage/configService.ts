@@ -18,12 +18,12 @@ import { LogLevel, isLogLevel, log } from "../logging/logger";
  *
  * Additionally:
  *  - Writes are ATOMIC (temp + rename) to avoid "Unexpected end of JSON input".
- *  - load() only rewrites the file if canonical content differs (prevents watcher loops).
+ *  - Canonicalization is avoided while the file is open to prevent editor/save conflicts.
  *  - Calls are serialized via a simple lock to avoid concurrent reads/writes.
  * ───────────────────────────────────────────────────────────────────────────────
  */
 
-export const CONFIG_SCHEMA_VERSION = 4 as const;
+export const CONFIG_SCHEMA_VERSION = 6 as const;
 
 export type RagMetric = "cosine" | "l2";
 
@@ -88,13 +88,28 @@ export interface EditPlannerConfig {
   guards: {
     discardWhitespaceOnlyChanges: boolean;
     preserveLineEndings: boolean;
-    maxPatchCoverageWarn: number;  // 0..1
+    maxPatchCoverageWarn: number; // 0..1
     maxPatchCoverageError: number; // 0..1
   };
 
   validation: {
     final: "light" | "heavy" | "superHeavy";
   };
+}
+
+export interface FilesViewConfig {
+  /**
+   * Extra excludes applied by the Files View (globs).
+   * These are merged with VS Code excludes when enabled.
+   */
+  excludeGlobs: string[];
+
+  /**
+   * If true, also respect VS Code settings:
+   *  - files.exclude
+   *  - search.exclude
+   */
+  useVscodeExcludes: boolean;
 }
 
 export interface AppConfig {
@@ -127,14 +142,15 @@ export interface AppConfig {
     };
   };
 
+  filesView: FilesViewConfig;
+
   contextDump: ContextDumpConfig;
 
   editPlanner: EditPlannerConfig;
 }
 
-
 const DEFAULT_EDIT_PLANNER: EditPlannerConfig = {
-  trace: { enabled: false },
+  trace: { enabled: true },
 
   parallel: {
     unitChanges: 6,
@@ -185,13 +201,13 @@ const DEFAULT_EDIT_PLANNER: EditPlannerConfig = {
 const DEFAULT_CONFIG: AppConfig = {
   schemaVersion: CONFIG_SCHEMA_VERSION,
 
-  logging: { level: "info" },
+  logging: { level: "debug" },
 
   openai: {
     embeddingModel: "text-embedding-3-small",
     modelLight: "gpt-5.1-codex-max",
     modelHeavy: "gpt-5.1-codex-max",
-    modelSuperHeavy: "gpt-5.2-pro"
+    modelSuperHeavy: "gpt-5.2"
   },
 
   rag: { k: 6, maxChars: 12000, metric: "cosine" },
@@ -216,6 +232,33 @@ const DEFAULT_CONFIG: AppConfig = {
     maxFileBytes: 0,
     maxTotalBytes: 0,
     openAfterDump: true
+  },
+
+  filesView: {
+    useVscodeExcludes: true,
+    excludeGlobs: [
+      "**/.git/**",
+      "**/.hg/**",
+      "**/.svn/**",
+      "**/.idea/**",
+      "**/.vscode/**",
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/out/**",
+      "**/.next/**",
+      "**/.nuxt/**",
+      "**/.cache/**",
+      "**/.turbo/**",
+      "**/.vercel/**",
+      "**/coverage/**",
+      "**/target/**",
+      "**/.venv/**",
+      "**/venv/**",
+      "**/__pycache__/**",
+      "**/.DS_Store",
+      "**/Thumbs.db"
+    ]
   },
 
   editPlanner: DEFAULT_EDIT_PLANNER
@@ -275,10 +318,35 @@ function asBool(v: any, fallback: boolean): boolean {
   return fallback;
 }
 
+function parentDir(u: vscode.Uri): vscode.Uri {
+  const parts = u.path.split("/");
+  parts.pop();
+  const dirPath = parts.join("/") || "/";
+  return u.with({ path: dirPath });
+}
+
+async function ensureDirForFile(uri: vscode.Uri): Promise<void> {
+  try {
+    await vscode.workspace.fs.createDirectory(parentDir(uri));
+  } catch {
+    // ignore; createDirectory is idempotent-ish and can race across processes
+  }
+}
+
 function replaceBasename(u: vscode.Uri, newName: string): vscode.Uri {
   const parts = u.path.split("/");
   parts[parts.length - 1] = newName;
   return u.with({ path: parts.join("/") });
+}
+
+/** Small content fingerprint to dedupe repeated backups. */
+function fnv1a32(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
 }
 
 export class ConfigService {
@@ -290,11 +358,26 @@ export class ConfigService {
   // watcher suppression helper (optional usage in extension watcher)
   private lastWriteAtMs = 0;
 
+  // serialize atomic writes per-target across *all* instances
+  private static writeLocks = new Map<string, Promise<void>>();
+
+  // loop guards / throttled UX warnings
+  private lastExternalWriterWarnAtMs = 0;
+  private lastDirtyMismatchWarnAtMs = 0;
+
+  // prevent infinite backup spam if the same incompatible content keeps reappearing
+  private lastBackupFingerprintByReason = new Map<string, string>();
+
   constructor(private readonly paths: StoragePaths) {}
 
   /** True if we wrote config.json very recently (useful for watcher suppression). */
   recentlyWrote(withinMs = 750): boolean {
     return Date.now() - this.lastWriteAtMs <= withinMs;
+  }
+
+  private findOpenDocument(uri: vscode.Uri): vscode.TextDocument | undefined {
+    const key = uri.toString();
+    return vscode.workspace.textDocuments.find((d) => d.uri.toString() === key);
   }
 
   async ensure(): Promise<void> {
@@ -348,11 +431,21 @@ export class ConfigService {
 
     try {
       bytes = await vscode.workspace.fs.readFile(uri);
-    } catch (err) {
-      log.caught("ConfigService.load read", err);
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      const isMissing = msg.includes("ENOENT");
+
+      if (isMissing) {
+        log.info("ConfigService.load: config.json missing; writing defaults", { configPath: uri.toString() });
+      } else {
+        log.caught("ConfigService.load read", err);
+      }
+
       this.data = DEFAULT_CONFIG;
       await this.writeJsonAtomic(uri, DEFAULT_CONFIG);
-      vscode.window.showWarningMessage("idyicyanere: config.json could not be read; reset to defaults.");
+      if (!isMissing) {
+        vscode.window.showWarningMessage("idyicyanere: config.json could not be read; reset to defaults.");
+      }
       return;
     }
 
@@ -367,7 +460,51 @@ export class ConfigService {
     }
 
     const sv = isRecord(parsed) ? parsed.schemaVersion : undefined;
+
+    // If file is from a *newer* schema, never downgrade / overwrite.
+    if (typeof sv === "number" && sv > CONFIG_SCHEMA_VERSION) {
+      log.warn("config.json schema is newer than this extension; refusing to overwrite.", {
+        found: sv,
+        expected: CONFIG_SCHEMA_VERSION,
+        config: uri.toString()
+      });
+
+      // keep running with defaults in-memory
+      this.data = DEFAULT_CONFIG;
+
+      const now = Date.now();
+      if (now - this.lastExternalWriterWarnAtMs > 10_000) {
+        this.lastExternalWriterWarnAtMs = now;
+        vscode.window.showWarningMessage(
+          `idyicyanere: config.json schemaVersion=${sv} is newer than this extension (expected ${CONFIG_SCHEMA_VERSION}). ` +
+            `Update the extension or delete the config to regenerate defaults.`
+        );
+      }
+      return;
+    }
+
     if (sv !== CONFIG_SCHEMA_VERSION) {
+      // If we just wrote config.json but it's already mismatched again, another writer is fighting us.
+      if (this.recentlyWrote(2000)) {
+        log.error("config.json schema mismatch immediately after we wrote it. Another process/extension host is overwriting it.", {
+          found: sv ?? "missing",
+          expected: CONFIG_SCHEMA_VERSION,
+          config: uri.toString()
+        });
+
+        this.data = DEFAULT_CONFIG;
+
+        const now = Date.now();
+        if (now - this.lastExternalWriterWarnAtMs > 10_000) {
+          this.lastExternalWriterWarnAtMs = now;
+          vscode.window.showErrorMessage(
+            "idyicyanere: config.json keeps reverting. This usually means another VS Code window/extension host (often an older build) " +
+              "is writing the config at the same time. Close other windows or uninstall the older version, then delete the globalStorage config."
+          );
+        }
+        return;
+      }
+
       await this.backupAndReset(uri, text, `schema_mismatch_${String(sv ?? "missing")}`);
       return;
     }
@@ -375,12 +512,8 @@ export class ConfigService {
     const sanitized = this.sanitizeWithinSchema(parsed);
     this.data = sanitized;
 
-    // Canonicalize ONLY if different, to avoid watcher loops.
-    const canonical = JSON.stringify(sanitized, null, 2) + "\n";
-    const diskNorm = text.endsWith("\n") ? text : text + "\n";
-    if (canonical !== diskNorm) {
-      await this.writeTextAtomic(uri, canonical);
-    }
+    // Canonicalization is intentionally avoided here (especially while file is open)
+    // to prevent save/reload conflicts and surprising formatting rewrites.
 
     log.debug("config.json loaded (strict schema)", {
       schemaVersion: sanitized.schemaVersion,
@@ -395,16 +528,50 @@ export class ConfigService {
   }
 
   private async backupAndReset(uri: vscode.Uri, oldText: string, reason: string): Promise<void> {
+    // If user is editing the config (dirty), do NOT back up and overwrite in a loop.
+    const openDoc = this.findOpenDocument(uri);
+    if (openDoc?.isDirty) {
+      log.warn("config.json incompatible but open+dirty; refusing to backup/reset to avoid an infinite loop.", {
+        reason,
+        config: uri.toString()
+      });
+
+      this.data = DEFAULT_CONFIG;
+
+      const now = Date.now();
+      if (now - this.lastDirtyMismatchWarnAtMs > 10_000) {
+        this.lastDirtyMismatchWarnAtMs = now;
+        vscode.window.showWarningMessage(
+          "idyicyanere: config.json is incompatible but currently open with unsaved changes. " +
+            "Close/discard your edits (or fix schemaVersion) so the extension can reset it."
+        );
+      }
+      return;
+    }
+
     try {
+      const fingerprint = fnv1a32(oldText);
+      const fpKey = `${uri.toString()}::${reason}`;
+      const prev = this.lastBackupFingerprintByReason.get(fpKey);
+      const shouldWriteBackup = prev !== fingerprint;
+      if (shouldWriteBackup) this.lastBackupFingerprintByReason.set(fpKey, fingerprint);
+
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const backupName = `config.backup.${reason}.${ts}.json`;
       const backupUri = replaceBasename(uri, backupName);
 
-      await vscode.workspace.fs.writeFile(backupUri, new TextEncoder().encode(oldText));
+      if (shouldWriteBackup) {
+        await vscode.workspace.fs.writeFile(backupUri, new TextEncoder().encode(oldText));
+      } else {
+        log.warn("Skipping duplicate config backup (same content already backed up for this reason).", {
+          reason,
+          config: uri.toString()
+        });
+      }
 
       log.warn("config.json incompatible; backed up + reset to defaults", {
         reason,
-        backup: backupUri.toString(),
+        backup: shouldWriteBackup ? backupUri.toString() : "<skipped-duplicate>",
         config: uri.toString()
       });
 
@@ -412,7 +579,8 @@ export class ConfigService {
       this.data = DEFAULT_CONFIG;
 
       vscode.window.showWarningMessage(
-        `idyicyanere: config.json was incompatible (${reason}) and was reset to defaults. A backup was written next to it.`
+        `idyicyanere: config.json was incompatible (${reason}) and was reset to defaults.` +
+          (shouldWriteBackup ? " A backup was written next to it." : " (Backup skipped: duplicate content.)")
       );
     } catch (err) {
       log.caught("ConfigService.backupAndReset", err);
@@ -438,7 +606,6 @@ export class ConfigService {
 
     // openai
     out.openai.embeddingModel = safeString(raw?.openai?.embeddingModel, DEFAULT_CONFIG.openai.embeddingModel);
-    // models
     out.openai.modelLight = safeString(raw?.openai?.modelLight, DEFAULT_CONFIG.openai.modelLight);
     out.openai.modelHeavy = safeString(raw?.openai?.modelHeavy, DEFAULT_CONFIG.openai.modelHeavy);
     out.openai.modelSuperHeavy = safeString(raw?.openai?.modelSuperHeavy, DEFAULT_CONFIG.openai.modelSuperHeavy);
@@ -473,6 +640,14 @@ export class ConfigService {
       }
     }
 
+    // filesView
+    out.filesView.useVscodeExcludes = asBool(raw?.filesView?.useVscodeExcludes, DEFAULT_CONFIG.filesView.useVscodeExcludes);
+    out.filesView.excludeGlobs = toStringArray(raw?.filesView?.excludeGlobs);
+    if (!out.filesView.excludeGlobs.length) {
+      // keep defaults if user sets junk / empty; v1 stability
+      out.filesView.excludeGlobs = DEFAULT_CONFIG.filesView.excludeGlobs.slice();
+    }
+
     // contextDump
     out.contextDump.dirName = safeName(raw?.contextDump?.dirName, DEFAULT_CONFIG.contextDump.dirName);
     out.contextDump.latestFileName = safeName(raw?.contextDump?.latestFileName, DEFAULT_CONFIG.contextDump.latestFileName);
@@ -502,97 +677,37 @@ export class ConfigService {
 
     // segmentation
     out.editPlanner.segmentation.newlineSnap = asBool(ep?.segmentation?.newlineSnap, DEFAULT_EDIT_PLANNER.segmentation.newlineSnap);
-    out.editPlanner.segmentation.newlineSnapWindow = clampInt(
-      ep?.segmentation?.newlineSnapWindow,
-      DEFAULT_EDIT_PLANNER.segmentation.newlineSnapWindow,
-      0,
-      20_000
-    );
-    out.editPlanner.segmentation.newlinePreferForward = asBool(
-      ep?.segmentation?.newlinePreferForward,
-      DEFAULT_EDIT_PLANNER.segmentation.newlinePreferForward
-    );
-    out.editPlanner.segmentation.minFragmentChars = clampInt(
-      ep?.segmentation?.minFragmentChars,
-      DEFAULT_EDIT_PLANNER.segmentation.minFragmentChars,
-      100,
-      200_000
-    );
+    out.editPlanner.segmentation.newlineSnapWindow = clampInt(ep?.segmentation?.newlineSnapWindow, DEFAULT_EDIT_PLANNER.segmentation.newlineSnapWindow, 0, 20_000);
+    out.editPlanner.segmentation.newlinePreferForward = asBool(ep?.segmentation?.newlinePreferForward, DEFAULT_EDIT_PLANNER.segmentation.newlinePreferForward);
+    out.editPlanner.segmentation.minFragmentChars = clampInt(ep?.segmentation?.minFragmentChars, DEFAULT_EDIT_PLANNER.segmentation.minFragmentChars, 100, 200_000);
     out.editPlanner.segmentation.maxFragmentChars = clampInt(
       ep?.segmentation?.maxFragmentChars,
       DEFAULT_EDIT_PLANNER.segmentation.maxFragmentChars,
       out.editPlanner.segmentation.minFragmentChars,
       500_000
     );
-    out.editPlanner.segmentation.contextChars = clampInt(
-      ep?.segmentation?.contextChars,
-      DEFAULT_EDIT_PLANNER.segmentation.contextChars,
-      0,
-      200_000
-    );
+    out.editPlanner.segmentation.contextChars = clampInt(ep?.segmentation?.contextChars, DEFAULT_EDIT_PLANNER.segmentation.contextChars, 0, 200_000);
 
     // targeting
     out.editPlanner.targeting.useRagHits = asBool(ep?.targeting?.useRagHits, DEFAULT_EDIT_PLANNER.targeting.useRagHits);
-    out.editPlanner.targeting.maxCandidateFiles = clampInt(
-      ep?.targeting?.maxCandidateFiles,
-      DEFAULT_EDIT_PLANNER.targeting.maxCandidateFiles,
-      1,
-      5000
-    );
-    out.editPlanner.targeting.padBeforeChars = clampInt(
-      ep?.targeting?.padBeforeChars,
-      DEFAULT_EDIT_PLANNER.targeting.padBeforeChars,
-      0,
-      500_000
-    );
-    out.editPlanner.targeting.padAfterChars = clampInt(
-      ep?.targeting?.padAfterChars,
-      DEFAULT_EDIT_PLANNER.targeting.padAfterChars,
-      0,
-      500_000
-    );
-    out.editPlanner.targeting.mergeGapChars = clampInt(
-      ep?.targeting?.mergeGapChars,
-      DEFAULT_EDIT_PLANNER.targeting.mergeGapChars,
-      0,
-      500_000
-    );
-    out.editPlanner.targeting.maxWindowsPerUnit = clampInt(
-      ep?.targeting?.maxWindowsPerUnit,
-      DEFAULT_EDIT_PLANNER.targeting.maxWindowsPerUnit,
-      1,
-      50
-    );
+    out.editPlanner.targeting.maxCandidateFiles = clampInt(ep?.targeting?.maxCandidateFiles, DEFAULT_EDIT_PLANNER.targeting.maxCandidateFiles, 1, 5000);
+    out.editPlanner.targeting.padBeforeChars = clampInt(ep?.targeting?.padBeforeChars, DEFAULT_EDIT_PLANNER.targeting.padBeforeChars, 0, 500_000);
+    out.editPlanner.targeting.padAfterChars = clampInt(ep?.targeting?.padAfterChars, DEFAULT_EDIT_PLANNER.targeting.padAfterChars, 0, 500_000);
+    out.editPlanner.targeting.mergeGapChars = clampInt(ep?.targeting?.mergeGapChars, DEFAULT_EDIT_PLANNER.targeting.mergeGapChars, 0, 500_000);
+    out.editPlanner.targeting.maxWindowsPerUnit = clampInt(ep?.targeting?.maxWindowsPerUnit, DEFAULT_EDIT_PLANNER.targeting.maxWindowsPerUnit, 1, 50);
 
     // attempts
     out.editPlanner.attempts.maxRounds = clampInt(ep?.attempts?.maxRounds, DEFAULT_EDIT_PLANNER.attempts.maxRounds, 1, 12);
     {
       const vmRaw = typeof ep?.attempts?.validateModel === "string" ? ep.attempts.validateModel.trim() : "";
-      out.editPlanner.attempts.validateModel =
-        vmRaw === "heavy" ? "heavy" : vmRaw === "superHeavy" ? "superHeavy" : "light";
+      out.editPlanner.attempts.validateModel = vmRaw === "heavy" ? "heavy" : vmRaw === "superHeavy" ? "superHeavy" : "light";
     }
 
     // guards
-    out.editPlanner.guards.discardWhitespaceOnlyChanges = asBool(
-      ep?.guards?.discardWhitespaceOnlyChanges,
-      DEFAULT_EDIT_PLANNER.guards.discardWhitespaceOnlyChanges
-    );
-    out.editPlanner.guards.preserveLineEndings = asBool(
-      ep?.guards?.preserveLineEndings,
-      DEFAULT_EDIT_PLANNER.guards.preserveLineEndings
-    );
-    out.editPlanner.guards.maxPatchCoverageWarn = clampNum(
-      ep?.guards?.maxPatchCoverageWarn,
-      DEFAULT_EDIT_PLANNER.guards.maxPatchCoverageWarn,
-      0,
-      1
-    );
-    out.editPlanner.guards.maxPatchCoverageError = clampNum(
-      ep?.guards?.maxPatchCoverageError,
-      DEFAULT_EDIT_PLANNER.guards.maxPatchCoverageError,
-      0,
-      1
-    );
+    out.editPlanner.guards.discardWhitespaceOnlyChanges = asBool(ep?.guards?.discardWhitespaceOnlyChanges, DEFAULT_EDIT_PLANNER.guards.discardWhitespaceOnlyChanges);
+    out.editPlanner.guards.preserveLineEndings = asBool(ep?.guards?.preserveLineEndings, DEFAULT_EDIT_PLANNER.guards.preserveLineEndings);
+    out.editPlanner.guards.maxPatchCoverageWarn = clampNum(ep?.guards?.maxPatchCoverageWarn, DEFAULT_EDIT_PLANNER.guards.maxPatchCoverageWarn, 0, 1);
+    out.editPlanner.guards.maxPatchCoverageError = clampNum(ep?.guards?.maxPatchCoverageError, DEFAULT_EDIT_PLANNER.guards.maxPatchCoverageError, 0, 1);
     if (out.editPlanner.guards.maxPatchCoverageError < out.editPlanner.guards.maxPatchCoverageWarn) {
       out.editPlanner.guards.maxPatchCoverageError = Math.min(1, out.editPlanner.guards.maxPatchCoverageWarn + 0.15);
     }
@@ -600,8 +715,7 @@ export class ConfigService {
     // validation
     {
       const vRaw = typeof ep?.validation?.final === "string" ? ep.validation.final.trim() : "";
-      out.editPlanner.validation.final =
-        vRaw === "light" ? "light" : vRaw === "superHeavy" ? "superHeavy" : "heavy";
+      out.editPlanner.validation.final = vRaw === "light" ? "light" : vRaw === "superHeavy" ? "superHeavy" : "heavy";
     }
 
     return out;
@@ -612,14 +726,70 @@ export class ConfigService {
     await this.writeTextAtomic(uri, text);
   }
 
+  private async withWriteLock(key: string, fn: () => Promise<void>): Promise<void> {
+    const prev = ConfigService.writeLocks.get(key) ?? Promise.resolve();
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+
+    const cur = prev.then(() => gate);
+    ConfigService.writeLocks.set(key, cur);
+
+    await prev;
+    try {
+      await fn();
+    } finally {
+      release();
+      if (ConfigService.writeLocks.get(key) === cur) {
+        ConfigService.writeLocks.delete(key);
+      }
+    }
+  }
+
+  private makeTmpUri(uri: vscode.Uri): vscode.Uri {
+    const stamp = Date.now().toString(16);
+    const rand = Math.random().toString(16).slice(2);
+    // same directory as target => rename stays atomic
+    return uri.with({ path: `${uri.path}.tmp.${stamp}.${rand}` });
+  }
+
   private async writeTextAtomic(uri: vscode.Uri, text: string): Promise<void> {
-    const enc = new TextEncoder();
-    const tmp = uri.with({ path: uri.path + ".tmp" });
+    const key = uri.toString(); // stable lock key
 
-    // write tmp then rename (prevents partial reads)
-    await vscode.workspace.fs.writeFile(tmp, enc.encode(text));
-    await vscode.workspace.fs.rename(tmp, uri, { overwrite: true });
+    await this.withWriteLock(key, async () => {
+      // If config.json is open in an editor, avoid temp+rename replacement.
+      // Also avoid doc.save() (it can return false under conflict); write directly to fs instead.
+      const openDoc = this.findOpenDocument(uri);
+      if (openDoc && !openDoc.isUntitled) {
+        if (openDoc.isDirty) {
+          log.warn("Skipped writing config.json because it is open and has unsaved changes.", {
+            configPath: uri.toString()
+          });
+          return;
+        }
 
-    this.lastWriteAtMs = Date.now();
+        await ensureDirForFile(uri);
+        await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+        this.lastWriteAtMs = Date.now();
+        return;
+      }
+
+      const enc = new TextEncoder();
+      const tmp = this.makeTmpUri(uri);
+
+      // ✅ ensure parent directory exists (globalStorage/.../waajacu.idyicyanere/)
+      await ensureDirForFile(uri);
+
+      try {
+        await vscode.workspace.fs.writeFile(tmp, enc.encode(text));
+        await vscode.workspace.fs.rename(tmp, uri, { overwrite: true });
+        this.lastWriteAtMs = Date.now();
+      } catch (err) {
+        try {
+          await vscode.workspace.fs.delete(tmp, { useTrash: false });
+        } catch {}
+        throw err;
+      }
+    });
   }
 }

@@ -19,8 +19,6 @@ echo "--- 2/4 Installing Project Dependencies ---"
 npm install
 
 echo "--- 3/4 Building & Bundling ---"
-# Limpieza inicial
-npm run vsix:clean
 
 # Generamos el bundle (un solo archivo JS)
 npm run bundle

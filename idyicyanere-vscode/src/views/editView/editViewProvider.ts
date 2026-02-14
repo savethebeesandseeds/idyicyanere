@@ -18,12 +18,14 @@ import {
   handleDiscardRun,
   handleClearView,
   handleOpenDiff,
+  handleOpenTrace,
   handleRollback,
   handleUpdateDraft,
   ApplyDeps,
 } from "./editApplyOps";
-import type { PlanMode } from "../../editing/pipeline/commons";
+import type { PlanMode } from "../../editing/pipeline/tools/types";
 import { loadWebviewHtmlTemplate } from "../htmlUtils";
+import { PlannerTraceCollector } from "../../editing/pipeline/tools/trace";
 
 function isRecord(x: any): x is Record<string, any> {
   return !!x && typeof x === "object" && !Array.isArray(x);
@@ -62,6 +64,8 @@ export class EditViewProvider implements vscode.WebviewViewProvider {
   private lastStatusText = "";
 
   private planCancel: CancelSource | null = null;
+  
+  private planTrace: PlannerTraceCollector | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -88,6 +92,8 @@ export class EditViewProvider implements vscode.WebviewViewProvider {
 
       getActiveRun: () => this.getActiveRun(),
       ensure_index: () => this.ensure_index(),
+
+      getTrace: () => this.planTrace
     };
   }
 
@@ -218,10 +224,14 @@ export class EditViewProvider implements vscode.WebviewViewProvider {
             const mode: PlanMode =
               rawMode === "execute" || rawMode === "auto" || rawMode === "plan" ? rawMode : "auto";
 
-            // NEW: cancel any prior run, then create a fresh cancel source for this run
+            //  cancel any prior run, then create a fresh cancel source for this run
             this.planCancel?.cancel();
             const cancel = makeCancelSource();
             this.planCancel = cancel;
+
+            this.planTrace = new PlannerTraceCollector({
+              cfg: this.config.data.editPlanner
+            });
 
             try {
               await handlePlanRun(
@@ -229,7 +239,7 @@ export class EditViewProvider implements vscode.WebviewViewProvider {
                 { config: this.config, manifest: this.manifest, openai: this.openai, ragStore: this.ragStore },
                 msg.prompt,
                 mode,
-                cancel // NEW param
+                cancel
               );
             } finally {
               // only clear if still the same token
@@ -259,6 +269,11 @@ export class EditViewProvider implements vscode.WebviewViewProvider {
           if (msg.type === "openFile") {
             const uri = vscode.Uri.parse(msg.uri);
             await vscode.commands.executeCommand("vscode.open", uri);
+            return;
+          }
+
+          if (msg.type === "openTrace") {
+            await handleOpenTrace(host, deps, msg.uri);
             return;
           }
 

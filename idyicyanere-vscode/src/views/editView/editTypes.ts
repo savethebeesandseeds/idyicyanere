@@ -8,6 +8,7 @@ export type WebviewIn =
   | { type: "clearView" }
   | { type: "clearHistory" }
   | { type: "openFile"; uri: string }
+  | { type: "openTrace"; uri: string }
   | { type: "openDiff"; uri: string; changeId?: string }
   | { type: "updateDraft"; uri?: string; changeId: string; newText: string }
   | { type: "applySelected"; uri?: string; changeId: string; newText: string }
@@ -24,6 +25,7 @@ export type ActiveRunOut = {
   planSummary?: string;
   consistencySummary?: string;
   issueCount?: number;
+  traceFileUri?: string;
   files: Array<{
     uri: string;
     rel: string;
@@ -42,6 +44,8 @@ export type ActiveRunOut = {
       end: number;
       applied: boolean;
       discarded: boolean;
+      locked?: boolean;
+      lockReason?: string;
       message?: string;
       newText: string;
     }>;

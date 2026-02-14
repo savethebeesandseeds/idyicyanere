@@ -1,385 +1,269 @@
-import { log } from "../../logging/logger";
-import { ProposedFile, ConsistencyIssue, ProposedChange } from "./tools/types";
+import { OpenAIService } from "../../openai/openaiService";
+import { PlannerConfig } from "./tools/types";
+import { errMsg, previewHeadTail, clampInt, normalizeRel, validatePhaseA, validatePhaseB } from "./tools/utils";
+import { ModeSession } from "./tools/modeSession";
 
-import {
-  ApplyCheckReport,
+import type {
+  ContextZero,
   ChangeDescription,
-  IncludedFile,
-  PlanChangesParams,
-  UnitChange,
-  loadPlannerConfig
-} from "./tools/commons";
+  UnitSplitOut,
+  UnitChange
+} from "./prompts";
 
-import { PlannerTraceCollector } from "./trace";
-import { writeReasoningTraceFile } from "./traceWriter";
-import { runBuilPlan } from "./phaseA_planning";
-import { runSplitUnits } from "./phaseB_unitChanges";
-import { runUnitChange, UnitResult } from "./phaseC_unitRunner";
-import { runFinalizeFile, FileUnitSummary } from "./phaseD_fileFinalizer";
+import { buildChangeDescription } from "./phaseA_planning";
+import { splitIntoUnits } from "./phaseB_unitChanges";
+import { finalizeFiles, type PhaseCOut } from "./phaseC_fileFinalizer";
 
-import { errMsg, normalizeRel, resolveMode, runPool, sevRank, ResolvedMode } from "./utils";
-
-type PlannerTelemetry = {
-  msTotal: number;
-  mode: ResolvedMode;
-  units: number;
-  diag: string[];
-
-  // Optional (filled if trace enabled/written)
-  traceFile?: string;
-  traceId?: string;
-  traceWriteError?: string;
+export type PipelineResult = {
+  phaseA: ChangeDescription;
+  phaseB: UnitSplitOut;
+  phaseC: PhaseCOut;
 };
 
-function dedupeIssues(issues: ConsistencyIssue[]): ConsistencyIssue[] {
-  const seen = new Set<string>();
-  const out: ConsistencyIssue[] = [];
-
-  for (const iss of issues ?? []) {
-    const rel = normalizeRel(iss.rel ?? "");
-    const key = `${iss.severity}|${rel}|${String(iss.message ?? "").trim()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ ...iss, rel: rel || iss.rel });
-  }
-
+function wrapPhaseError(phaseTag: string, e: unknown): Error {
+  const msg = errMsg(e);
+  const out = new Error(`${phaseTag} ${msg}`);
+  (out as any).cause = e;
   return out;
 }
 
-export async function planChanges(params: PlanChangesParams): Promise<{
-  plan?: any;
-  planMeta: any;
+function groupEditsByFile(edits: UnitChange[]): { file: string; edits: UnitChange[] }[] {
+  const by = new Map<string, { file: string; edits: { idx: number; e: UnitChange }[] }>();
+  (edits ?? []).forEach((e, idx) => {
+    const file = String((e as any)?.file ?? "").trim();
+    if (!file) return;
+    if (!by.has(file)) by.set(file, { file, edits: [] });
+    by.get(file)!.edits.push({ idx, e });
+  });
 
-  applyCheck?: any;
-  consistency?: any;
-  files: ProposedFile[];
+  return Array.from(by.values()).map((g) => ({
+    file: g.file,
+    edits: g.edits.sort((a, b) => a.idx - b.idx).map((x) => x.e)
+  }));
+}
 
-  telemetry?: any;
-}> {
+export async function runPipeline(params: {
+  c0: ContextZero;
+  cfg: PlannerConfig;
+  openai: OpenAIService;
+  status: (s: string) => void;
+  modeSession: ModeSession;
+
+  // knobs
+  parallelUnits?: number; // default: cfg.parallel?.unitChanges ?? 4
+  max_attempt?: number;   // default: 2
+}): Promise<PipelineResult> {
   const t0 = Date.now();
-  await params.config.ensure();
 
-  const cfg = loadPlannerConfig(params.config);
-  const mode = resolveMode(params.mode, params.prompt);
-  const status = (s: string) => params.onStatus?.(s);
-
-  const diag: string[] = [];
-
-  const relToIndex = new Map<string, number>();
-  for (let i = 0; i < params.files.length; i++) relToIndex.set(normalizeRel(params.files[i].rel), i);
-
-  // Trace collector
-  let trace: PlannerTraceCollector | undefined;
-  if (cfg.trace.enabled) {
-    trace = new PlannerTraceCollector({
-      prompt: String(params.prompt ?? ""),
-      mode,
-      cfg,
-      inputFiles: (params.files ?? []).map((f) => ({
-        rel: String(f.rel ?? ""),
-        uri: f.uri?.toString?.() ?? String(f.uri ?? ""),
-        chunkChars: Math.trunc(Number((f as any)?.chunkChars ?? 0)) || 0
-      }))
-    });
-  }
-
-  // File read cache
-  const fileTextCache = new Map<string, Promise<any>>();
-  const readCached = (f: IncludedFile) => {
-    const key = f.uri.toString();
-    let p = fileTextCache.get(key);
-    if (!p) {
-      p = params.readTextFile(f.uri);
-      fileTextCache.set(key, p);
+  // Harden status so a UI glitch doesn't kill the pipeline.
+  const status = (s: string) => {
+    try {
+      params.status(s);
+    } catch (e) {
+      params.modeSession.diag?.push(`[pipeline] status handler threw: ${errMsg(e)}`);
     }
-    return p as any;
   };
 
-  // Empty prompt guard (optional but nice)
-  const prompt = String(params.prompt ?? "").trim();
-  if (!prompt) {
-    const files: ProposedFile[] = params.files.map((f) => ({
-      uri: f.uri.toString(),
-      rel: normalizeRel(f.rel),
-      status: "skipped",
-      message: "No prompt provided.",
-      oldText: undefined,
-      changes: []
-    }));
-
-    for (let i = 0; i < files.length; i++) params.onFileResult?.(i, files[i]);
-
-    const telemetry: PlannerTelemetry = {
-      msTotal: Date.now() - t0,
-      mode,
-      units: 0,
-      diag: []
-    };
-
-    const ret = {
-      plan: null,
-      planMeta: {
-        status: "need_input",
-        explanation: "No prompt provided.",
-        questions: ["What change do you want to make?"]
-      },
-      applyCheck: null,
-      consistency: {
-        summary: "No changes planned (need input).",
-        issues: [{ severity: "warn", message: "No prompt provided." }]
-      },
-      files,
-      telemetry
-    };
-
-    if (trace) {
-      trace.setFinal({ planMeta: ret.planMeta, files: { total: files.length } });
-      const uri = await writeReasoningTraceFile(params, trace.trace);
-      if (uri) {
-        telemetry.traceFile = uri.toString();
-        telemetry.traceId = trace.trace.id;
-      }
-    }
-
-    return ret;
-  }
-
-  // ---------------- Phase A ----------------
-  const changeDescription: ChangeDescription = await buildChangeDescription({
-    mode,
-    prompt,
-    cfg,
-    openai: params.openai,
-    status,
-    diag,
-    trace,
-    files: params.files
-  });
-
-  const units: UnitChange[] = await splitIntoUnits({
-    changeDescription,
-    cfg,
-    openai: params.openai,
-    status,
-    diag,
-    trace,
-    files: params.files
-  });
-
-  // ---------------- Phase B (parallel per unit) ----------------
-  const unitResults: UnitResult[] = new Array(units.length);
-
-  await runPool(
-    units.map((u, idx) => ({ u, idx })),
-    cfg.parallel.unitChanges,
-    async ({ u, idx }) => {
-      const r = await runUnitChange({
-        cfg,
-        mode,
-        userPrompt: prompt,
-        changeDescription,
-        unit: u,
-        unitIndex: idx,
-        files: params.files,
-        relToIndex,
-        readCached,
-        ragStore: params.ragStore,
-        openai: params.openai,
-        status,
-        trace
-      });
-
-      unitResults[idx] = r;
-    }
+  const parallelUnits = clampInt(
+    (params as any)?.parallelUnits ?? (params.cfg as any)?.parallel?.unitChanges ?? 4,
+    1,
+    64,
+    4
   );
 
-  // ---------------- Phase C (parallel per file) ----------------
-  type FileGroup = {
-    fileIndex: number;
-    file: IncludedFile;
-    rel: string;
-    changes: ProposedChange[];
-    unitIssues: ConsistencyIssue[];
-    unitsForFile: FileUnitSummary[];
+  const max_attempt = clampInt((params as any)?.max_attempt ?? 2, 1, 10, 2);
+
+  const getCfgModels = () => {
+    const cfg: any = params.cfg as any;
+    return cfg?.models ?? cfg?.model ?? cfg?.openai?.models ?? cfg?.openai?.model ?? undefined;
   };
 
-  const groups = new Map<string, FileGroup>();
+  const getOpenAIModelHint = () => {
+    const oa: any = params.openai as any;
+    return oa?.model ?? oa?.cfg?.model ?? oa?.cfg?.models ?? oa?.defaults?.model ?? oa?.client?.model ?? undefined;
+  };
 
-  for (const ur of unitResults) {
-    if (!ur?.target?.rel) continue;
-    const rel = normalizeRel(ur.target.rel);
-    const fileIndex = relToIndex.get(rel);
-    if (typeof fileIndex !== "number") continue;
+  const promptText = String((params.c0 as any)?.prompt ?? "");
+  const promptPreview = previewHeadTail(promptText, 2000, 800);
 
-    let g = groups.get(rel);
-    if (!g) {
-      g = {
-        fileIndex,
-        file: params.files[fileIndex],
-        rel,
-        changes: [],
-        unitIssues: [],
-        unitsForFile: []
-      };
-      groups.set(rel, g);
-    }
-
-    if (ur.change) g.changes.push(ur.change);
-
-    for (const iss of ur.issues ?? []) {
-      g.unitIssues.push({ ...iss, rel: rel });
-    }
-
-    // unique unit summaries for this file (used in final file validation)
-    if (!g.unitsForFile.some((x) => x.id === ur.unit.id)) {
-      g.unitsForFile.push({
-        id: ur.unit.id,
-        title: ur.unit.title,
-        instructions: ur.unit.instructions,
-        acceptanceCriteria: ur.unit.acceptanceCriteria
-      });
-    }
-  }
-
-  const results: ProposedFile[] = new Array(params.files.length);
-  const applyFiles: ApplyCheckReport["files"] = [];
-  const allIssues: ConsistencyIssue[] = [];
-
-  await runPool(Array.from(groups.values()), cfg.parallel.files, async (g) => {
-    status(`Finalizing file: ${g.rel} …`);
-
-    const read = await readCached(g.file);
-    if (!read.ok) {
-      const pf: ProposedFile = {
-        uri: g.file.uri.toString(),
-        rel: g.rel,
-        status: "error",
-        message: `Failed to read file: ${read.reason}`,
-        oldText: undefined,
-        changes: []
-      };
-      results[g.fileIndex] = pf;
-      params.onFileResult?.(g.fileIndex, pf);
-
-      allIssues.push({
-        severity: "error",
-        rel: g.rel,
-        message: `Failed to read file: ${read.reason}`,
-        suggestion: "Check filesystem/workspace state.",
-        source: "apply"
-      });
-
-      return;
-    }
-
-    const fin = await finalizeFile({
-      cfg,
-      userPrompt: prompt,
-      rel: g.rel,
-      uri: g.file.uri.toString(),
-      oldText: read.text,
-      changes: g.changes,
-      unitIssues: g.unitIssues,
-      unitsForFile: g.unitsForFile,
-      openai: params.openai
-    });
-
-    results[g.fileIndex] = fin.proposedFile;
-    params.onFileResult?.(g.fileIndex, fin.proposedFile);
-
-    applyFiles.push(fin.applyCheckFile);
-    allIssues.push(...fin.issues);
-
-    trace?.addEvent("file_done", {
-      rel: g.rel,
-      status: fin.proposedFile.status,
-      message: fin.proposedFile.message,
-      applyOk: fin.applyCheckFile.ok,
-      issueCount: fin.issues.length
-    });
+  params.modeSession.trace?.addEvent?.("pipeline_start", {
+    startedAtMs: t0,
+    modeKind: params.modeSession.kind,
+    parallelUnits,
+    max_attempt,
+    promptChars: promptText.length,
+    promptPreview,
+    cfgModels: getCfgModels(),
+    openaiModelHint: getOpenAIModelHint(),
+    cfg: params.cfg
   });
 
-  // Fill untouched files
-  for (let i = 0; i < params.files.length; i++) {
-    if (results[i]) continue;
+  // Precompute available rels once (used in validations)
+  const availRels = (params.c0.files ?? [])
+    .map((f: any) => normalizeRel(String(f?.rel ?? "")))
+    .filter(Boolean);
 
-    const f = params.files[i];
-    const pf: ProposedFile = {
-      uri: f.uri.toString(),
-      rel: normalizeRel(f.rel),
-      status: "unchanged",
-      message: "Untouched",
-      oldText: undefined,
-      changes: []
-    };
-    results[i] = pf;
-    params.onFileResult?.(i, pf);
+  // ---------------- Phase A ----------------
+  let phaseA: ChangeDescription;
+  try {
+    status("pipeline: phaseA (change description)...");
+    params.modeSession.trace?.addEvent?.("pipeline_phaseA_start", {
+      atMs: Date.now(),
+      modekind: params.modeSession.kind,
+      cfgModels: getCfgModels(),
+      openaiModelHint: getOpenAIModelHint()
+    });
+
+    const tA0 = Date.now();
+    phaseA = await buildChangeDescription({
+      c0: params.c0,
+      mode: params.modeSession,
+      cfg: params.cfg,
+      openai: params.openai,
+      status,
+      prompt: promptText
+    });
+    const tA1 = Date.now();
+
+    params.modeSession.trace?.addEvent?.("pipeline_phaseA_done", {
+      ms: Math.max(0, tA1 - tA0),
+      phaseA,
+      phaseA_summary: (phaseA as any)?.summary,
+      phaseA_planPreview:
+        typeof (phaseA as any)?.plan === "string"
+          ? previewHeadTail(String((phaseA as any).plan), 2000, 800)
+          : undefined,
+      phaseA_planChars:
+        typeof (phaseA as any)?.plan === "string"
+          ? String((phaseA as any).plan).length
+          : undefined
+    });
+  } catch (e: any) {
+    const msg = errMsg(e);
+    params.modeSession.diag?.push(`[pipeline] phaseA failed: ${msg}`);
+    params.modeSession.trace?.addEvent?.("pipeline_phaseA_failed", { msg });
+    throw wrapPhaseError("<pipeline_phaseA>", e);
   }
 
-  // Apply report
-  const applyIssues = applyFiles.flatMap((f) => f.issues ?? []);
-  const applyOk = applyIssues.every((x) => sevRank(x.severity) < 2);
+  const vA = params.modeSession.validate("phaseA", () => validatePhaseA(phaseA, availRels));
+  if (!vA.ok) {
+    throw wrapPhaseError("<pipeline_phaseA_validation>", new Error(vA.issues.map((x) => x.message).join("; ")));
+  }
 
-  const applyCheck: ApplyCheckReport = {
-    ok: applyOk,
-    summary: applyIssues.length
-      ? `Apply simulation found ${applyIssues.length} issue(s) across ${new Set(applyIssues.map((x) => x.rel || "")).size} file(s).`
-      : "Apply simulation OK.",
-    files: applyFiles.slice().sort((a, b) => a.rel.localeCompare(b.rel)),
-    issues: applyIssues
-  };
+  // ---------------- Phase B ----------------
+  let phaseB: UnitSplitOut;
+  try {
+    status("pipeline: phaseB (compile edits)...");
+    params.modeSession.trace?.addEvent?.("pipeline_phaseB_start", {
+      atMs: Date.now(),
+      phaseA_summary: (phaseA as any)?.summary
+    });
 
-  // Consistency (merged issues)
-  const consistencyIssues = dedupeIssues(allIssues);
-  const hasErrors = consistencyIssues.some((x) => sevRank(x.severity) >= 2);
+    const tB0 = Date.now();
+    phaseB = await splitIntoUnits({
+      c0: params.c0,
+      phaseA,
+      mode: params.modeSession, // ModeSession goes into phaseB now
+      cfg: params.cfg,
+      openai: params.openai,
+      status
+    });
+    const tB1 = Date.now();
 
-  const consistency = {
-    summary: hasErrors
-      ? `Validation found ${consistencyIssues.length} issue(s) (errors present).`
-      : (consistencyIssues.length ? `Validation found ${consistencyIssues.length} issue(s).` : "Validation OK."),
-    issues: consistencyIssues
-  };
-
-  // ✅ TELEMETRY FIX: explicitly typed object we can extend
-  const telemetry: PlannerTelemetry = {
-    msTotal: Date.now() - t0,
-    mode,
-    units: units.length,
-    diag: diag.slice(0, 200)
-  };
-
-  const ret = {
-    plan: changeDescription,
-    planMeta: { status: "ok", explanation: changeDescription.summary },
-
-    applyCheck,
-    consistency,
-    files: results,
-
-    telemetry
-  };
-
-  // Trace writing (optional)
-  if (trace) {
-    try {
-      trace.setFinal({
-        mode,
-        changeDescription,
-        unitCount: units.length,
-        applyCheck: { ok: applyCheck.ok, summary: applyCheck.summary },
-        consistency: { summary: consistency.summary, issues: consistency.issues.slice(0, 200) }
-      });
-
-      const uri = await writeReasoningTraceFile(params, trace.trace);
-      if (uri) {
-        telemetry.traceFile = uri.toString();
-        telemetry.traceId = trace.trace.id;
-      }
-    } catch (e: any) {
-      telemetry.traceWriteError = errMsg(e);
+    if (!Array.isArray((phaseB as any).edits) || (phaseB.edits?.length ?? 0) === 0) {
+      throw new Error("Edit compile produced zero edits.");
     }
+
+    const edits = (phaseB.edits ?? []) as any[];
+    const fileCounts = new Map<string, number>();
+    for (const e of edits) {
+      const f = String(e?.file ?? "").trim();
+      if (!f) continue;
+      fileCounts.set(f, (fileCounts.get(f) ?? 0) + 1);
+    }
+
+    params.modeSession.trace?.addEvent?.("pipeline_phaseB_done", {
+      ms: Math.max(0, tB1 - tB0),
+      phaseB,
+      editCount: phaseB.edits.length,
+      files: Array.from(fileCounts.entries()).map(([file, count]) => ({ file, count }))
+    });
+  } catch (e: any) {
+    const msg = errMsg(e);
+    params.modeSession.diag?.push(`[pipeline] phaseB failed: ${msg}`);
+    params.modeSession.trace?.addEvent?.("pipeline_phaseB_failed", { msg });
+    throw wrapPhaseError("<pipeline_phaseB>", e);
   }
 
-  log.info("planChanges(v2) done", { ms: telemetry.msTotal, mode, units: units.length });
-  return ret;
+  const vB = params.modeSession.validate("phaseB", () => validatePhaseB(phaseB, availRels));
+  if (!vB.ok) {
+    throw wrapPhaseError("<pipeline_phaseB_validation>", new Error(vB.issues.map((x) => x.message).join("; ")));
+  }
+
+  // ---------------- Phase C ----------------
+  let phaseC: PhaseCOut;
+  try {
+    status("pipeline: phaseC (finalize + syntax check)...");
+    params.modeSession.trace?.addEvent?.("pipeline_phaseC_start", {
+      atMs: Date.now(),
+      editCount: phaseB.edits?.length ?? 0
+    });
+
+    const tC0 = Date.now();
+    phaseC = await finalizeFiles({
+      c0: params.c0,
+      phaseA,
+      phaseB,
+      mode: params.modeSession,
+      cfg: params.cfg,
+      openai: params.openai,
+      status
+    });
+    const tC1 = Date.now();
+
+    params.modeSession.trace?.addEvent?.("pipeline_phaseC_done", {
+      ms: Math.max(0, tC1 - tC0),
+      ok: phaseC.ok,
+      summary: phaseC.summary,
+      fileCount: phaseC.files.length,
+      files: phaseC.files.map((f) => ({
+        rel: f.rel,
+        applyOk: f.applyOk,
+        syntaxOk: f.syntaxOk,
+        editCount: f.edits.length,
+        beforeHash: f.beforeHash,
+        afterHash: f.afterHash
+      }))
+    });
+
+    // Record validation in ModeSession (do NOT necessarily throw; you can decide later)
+    params.modeSession.validate("phaseC", () => {
+      const issues: any[] = [];
+      for (const f of phaseC.files ?? []) {
+        if (!f.applyOk) {
+          issues.push({ severity: "error", code: "apply_failed", message: `Phase C apply failed for ${f.rel}.` });
+        }
+        if (!f.syntaxOk) {
+          const first = (f.syntaxIssues ?? []).find((x) => x.severity === "error");
+          issues.push({
+            severity: "error",
+            code: "syntax_failed",
+            message: `Phase C syntax failed for ${f.rel}: ${first?.message ?? "syntax error"}`
+          });
+        }
+      }
+      return issues;
+    });
+  } catch (e: any) {
+    const msg = errMsg(e);
+    params.modeSession.diag?.push(`[pipeline] phaseC failed: ${msg}`);
+    params.modeSession.trace?.addEvent?.("pipeline_phaseC_failed", { msg });
+    throw wrapPhaseError("<pipeline_phaseC>", e);
+  }
+
+  return {
+    phaseA,
+    phaseB,
+    phaseC
+  };
 }

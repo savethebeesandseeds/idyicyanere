@@ -7,7 +7,7 @@ import { log } from "../logging/logger";
 import * as path from "path";
 import * as crypto from "crypto";
 
-// NEW: Imports for the chunking refactor
+//  Imports for the chunking refactor
 import { ChunkingStrategy } from "./chunking/types";
 import { FixedChunker } from "./chunking/fixedChunker";
 import { LineChunker } from "./chunking/lineChunker";
@@ -20,10 +20,65 @@ export type FileIndexStatus =
   | { kind: "hidden"; label: "hidden"; icon: vscode.ThemeIcon }
   | { kind: "error"; label: "error"; icon: vscode.ThemeIcon };
 
+function isRecord(x: any): x is Record<string, any> {
+  return !!x && typeof x === "object" && !Array.isArray(x);
+}
+
+function normalizeRelPath(rel: string): string {
+  return (rel ?? "").replace(/\\/g, "/");
+}
+
+function getVscodeExcludeKeys(section: "files" | "search"): string[] {
+  const cfg = vscode.workspace.getConfiguration(section);
+  const obj = cfg.get<any>("exclude");
+  if (!isRecord(obj)) return [];
+  return Object.entries(obj)
+    .filter(([, v]) => v === true)
+    .map(([k]) => String(k).trim())
+    .filter(Boolean);
+}
+
+function normalizeExcludeGlob(g: string): string {
+  const s = String(g ?? "").trim();
+  if (!s) return "";
+  // If user wrote a bare segment like "node_modules", treat it as folder
+  if (!/[*?\[\]{}/]/.test(s) && !s.includes("**")) {
+    const seg = s.replace(/\/+$/g, "");
+    return `**/${seg}/**`;
+  }
+  if (s.endsWith("/")) return `${s}**`;
+  return s;
+}
+
+/**
+ * Same fast-path logic used in FilesView: extract folder "segments" from globs like "node_modules/**".
+ * This keeps indexing decisions cheap + stable.
+ */
+function deriveExcludedSegments(excludeGlobs: string[]): string[] {
+  const out: string[] = [];
+  for (const g of excludeGlobs ?? []) {
+    const m = String(g).match(/^\*\*\/([^*?[\]{}!]+)\/\*\*$/);
+    if (m?.[1]) out.push(m[1]);
+  }
+  return out;
+}
+
+function isExcludedRel(rel: string, excludedSegments: string[]): boolean {
+  const parts = normalizeRelPath(rel).split("/").filter(Boolean);
+  for (const seg of excludedSegments) {
+    if (parts.includes(seg)) return true;
+  }
+  return false;
+}
+
+function uniq(xs: string[]): string[] {
+  return Array.from(new Set(xs));
+}
+
 export class IndexService {
   private indexing = new Set<string>();
 
-  // NEW: Strategy instances
+  //  Strategy instances
   private fixedChunker = new FixedChunker();
   private lineChunker = new LineChunker();
 
@@ -44,7 +99,23 @@ export class IndexService {
     return e.toLowerCase();
   }
 
-  // NEW: Helper to resolve strategy + size from config
+  private getIndexExcludeGlobs(): string[] {
+    const own = (this.config.data.indexing.excludeGlobs ?? []).map(normalizeExcludeGlob).filter(Boolean);
+    const vs = [
+      ...getVscodeExcludeKeys("files"),
+      ...getVscodeExcludeKeys("search"),
+    ].map(normalizeExcludeGlob).filter(Boolean);
+
+    return uniq([...own, ...vs]);
+  }
+
+  private isExcludedByConfig(rel: string): boolean {
+    const globs = this.getIndexExcludeGlobs();
+    const segs = deriveExcludedSegments(globs);
+    return isExcludedRel(rel, segs);
+  }
+
+  //  Helper to resolve strategy + size from config
   private getChunkerForRel(rel: string): { strategy: ChunkingStrategy; chunkChars: number } {
     const ext = this.normalizeExt(path.extname(rel));
     const byExt = this.config.data.indexing.chunking.byExtension;
@@ -102,7 +173,14 @@ export class IndexService {
     this.indexing.add(key);
 
     const rel = vscode.workspace.asRelativePath(uri, false);
-    
+
+    // Skip ignored paths (config indexing.excludeGlobs + VS Code excludes)
+    if (this.isExcludedByConfig(rel)) {
+      log.info("IndexService.indexFile() skipped (excluded)", { file: rel });
+      vscode.window.showInformationMessage(`Skipped (excluded): ${rel}`);
+      return;
+    }
+
     const { strategy, chunkChars } = this.getChunkerForRel(rel);
 
     log.info("IndexService.indexFile() start", { file: rel, strategy: strategy.constructor.name });
@@ -165,7 +243,7 @@ export class IndexService {
         await this.store.deleteRows(old.rows);
       }
 
-      // NEW: Use the strategy to chunk
+      //  Use the strategy to chunk
       const pieces = strategy.chunk(text, chunkChars);
 
       if (pieces.length === 0) {

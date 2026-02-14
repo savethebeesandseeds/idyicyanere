@@ -40,6 +40,56 @@ async function sendRoots(host: FilesHost, deps: FilesDeps): Promise<void> {
   host.post({ type: "roots", rows });
 }
 
+function isRecord(x: any): x is Record<string, any> {
+  return !!x && typeof x === "object" && !Array.isArray(x);
+}
+
+function getVscodeExcludeKeys(section: "files" | "search"): string[] {
+  const cfg = vscode.workspace.getConfiguration(section);
+  const obj = cfg.get<any>("exclude");
+  if (!isRecord(obj)) return [];
+  return Object.entries(obj)
+    .filter(([, v]) => v === true)
+    .map(([k]) => String(k).trim())
+    .filter(Boolean);
+}
+
+function normalizeExcludeGlob(g: string): string {
+  const s = String(g ?? "").trim();
+  if (!s) return "";
+  // If user wrote "node_modules" (no glob chars), treat as folder segment
+  if (!/[*?\[\]{}/]/.test(s) && !s.includes("**")) {
+    const seg = s.replace(/\/+$/g, "");
+    return `**/${seg}/**`;
+  }
+  // If it ends in "/" treat as folder
+  if (s.endsWith("/")) return `${s}**`;
+  return s;
+}
+
+function uniq(xs: string[]): string[] {
+  return Array.from(new Set(xs));
+}
+
+function getFilesViewExcludeGlobs(deps: FilesDeps): string[] {
+  const cfg = deps.config.data.filesView;
+
+  const own = (cfg?.excludeGlobs ?? [])
+    .map(normalizeExcludeGlob)
+    .filter(Boolean);
+
+  if (!cfg?.useVscodeExcludes) return uniq(own);
+
+  const vs = [
+    ...getVscodeExcludeKeys("files"),
+    ...getVscodeExcludeKeys("search"),
+  ]
+    .map(normalizeExcludeGlob)
+    .filter(Boolean);
+
+  return uniq([...own, ...vs]);
+}
+
 function relWithinWorkspace(uri: vscode.Uri): { folder: vscode.WorkspaceFolder | undefined; rel: string } {
   const wf = vscode.workspace.getWorkspaceFolder(uri);
   if (!wf) return { folder: undefined, rel: normalizeRel(vscode.workspace.asRelativePath(uri, false)) };
@@ -65,7 +115,7 @@ async function runSearch(host: FilesHost, deps: FilesDeps, query: string, limit 
     return;
   }
 
-  const excluded = deps.config.data.indexing.excludeGlobs ?? [];
+  const excluded = getFilesViewExcludeGlobs(deps);
   const excludeGlob = excluded.length ? `{${excluded.join(",")}}` : undefined;
 
   // Grab a bounded pool, then filter by substring (simple + effective)
@@ -183,7 +233,7 @@ async function runSearch(host: FilesHost, deps: FilesDeps, query: string, limit 
 async function listChildren(deps: FilesDeps, dir: vscode.Uri): Promise<NodeRow[]> {
   await deps.config.ensure();
 
-  const excluded = deriveExcludedSegments(deps.config.data.indexing.excludeGlobs);
+  const excluded = deriveExcludedSegments(getFilesViewExcludeGlobs(deps));
 
   let entries: [string, vscode.FileType][];
   try {
@@ -260,7 +310,7 @@ async function sendChildren(host: FilesHost, deps: FilesDeps, parentUri: string)
 async function collectFilesRecursive(deps: FilesDeps, baseUri: vscode.Uri, limit = 20000): Promise<vscode.Uri[]> {
   await deps.config.ensure();
 
-  const excluded = deriveExcludedSegments(deps.config.data.indexing.excludeGlobs);
+  const excluded = deriveExcludedSegments(getFilesViewExcludeGlobs(deps));
   const out: vscode.Uri[] = [];
 
   const walk = async (dir: vscode.Uri) => {

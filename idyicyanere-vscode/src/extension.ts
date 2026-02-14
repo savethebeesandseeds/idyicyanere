@@ -201,9 +201,26 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(wsWatcher);
 
-  cfgWatcher.onDidChange(() => void reloadConfig("changed"));
-  cfgWatcher.onDidCreate(() => void reloadConfig("created"));
-  cfgWatcher.onDidDelete(() => void reloadConfig("deleted"));
+  let cfgTimer: NodeJS.Timeout | undefined;
+
+  function scheduleReloadConfig(reason: string) {
+    if (cfgTimer) clearTimeout(cfgTimer);
+    cfgTimer = setTimeout(() => void reloadConfig(reason), 150);
+  }
+
+  cfgWatcher.onDidChange(() => {
+    if (config.recentlyWrote()) return;
+    scheduleReloadConfig("changed");
+  });
+  cfgWatcher.onDidCreate(() => {
+    if (config.recentlyWrote()) return;
+    scheduleReloadConfig("created");
+  });
+  cfgWatcher.onDidDelete(() => {
+    if (config.recentlyWrote()) return;
+    scheduleReloadConfig("deleted");
+  });
+
   context.subscriptions.push(cfgWatcher);
 
   context.subscriptions.push({

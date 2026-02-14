@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import { promises as fs } from "fs";
-
-export type ResolvedMode = "plan" | "execute";
+import type { ResolvedMode, IncludedFile } from "./types";
 
 export function resolveMode(mode: any, prompt: string): ResolvedMode {
   const m = String(mode ?? "").trim().toLowerCase();
@@ -31,7 +30,7 @@ export function resolveMode(mode: any, prompt: string): ResolvedMode {
 }
 
 
-export async function buildFilesContext(files: Array<{ rel: string; uri: string }>): Promise<{
+export async function buildFilesContext(files: IncludedFile[]): Promise<{
   filesList: string[];
   filesContent: string;
 }> {
@@ -327,4 +326,146 @@ export function previewHeadTail(text: string, headChars = 2000, tailChars = 800)
   if (!s) return { head: "", tail: "" };
   if (s.length <= headChars + tailChars + 32) return { head: s, tail: "" };
   return { head: s.slice(0, Math.max(0, headChars)), tail: s.slice(Math.max(0, s.length - tailChars)) };
+}
+
+
+// -----------------------------------------------------------------------------
+// Phase validations (ModeSession.validate callers)
+// -----------------------------------------------------------------------------
+
+export type ModeIssue = {
+  severity: "warn" | "error";
+  message: string;
+  code?: string;
+};
+
+function extractUnidiffHeaderPaths(diff: string): { oldPath?: string; newPath?: string; headerCount: number } {
+  const s = String(diff ?? "");
+  const lines = s.split(/\r?\n/g);
+
+  const takePath = (line: string) => {
+    // "--- a/foo" or "+++ b/foo" or "--- foo"
+    return line.replace(/^---\s+/, "").replace(/^\+\+\+\s+/, "").trim();
+  };
+
+  let oldPath: string | undefined;
+  let newPath: string | undefined;
+  let headerCount = 0;
+
+  for (const line of lines) {
+    if (line.startsWith("--- ")) {
+      headerCount++;
+      if (!oldPath) oldPath = takePath(line);
+    } else if (line.startsWith("+++ ")) {
+      headerCount++;
+      if (!newPath) newPath = takePath(line);
+    }
+  }
+
+  return { oldPath, newPath, headerCount };
+}
+
+function normalizeDiffPath(p?: string): string {
+  const s = String(p ?? "").trim();
+  if (!s) return "";
+  if (s === "/dev/null") return s;
+  return normalizeRel(s.replace(/^a\//, "").replace(/^b\//, ""));
+}
+
+export function validatePhaseA(phaseA: any, availRels: string[]): ModeIssue[] {
+  const issues: ModeIssue[] = [];
+  const plan = String(phaseA?.plan ?? "");
+
+  if (!plan.trim()) {
+    issues.push({ severity: "error", code: "empty_plan", message: "Phase A produced an empty <plan>." });
+  } else if (plan.trim().length < 40) {
+    issues.push({
+      severity: "warn",
+      code: "plan_short",
+      message: "Phase A <plan> is very short; downstream may under-specify edits."
+    });
+  }
+
+  const mentionsAny = (availRels ?? []).some((r) => r && plan.includes(r));
+  if (!mentionsAny) {
+    issues.push({
+      severity: "warn",
+      code: "no_file_mentions",
+      message: "Phase A <plan> did not mention any AVAILABLE FILE paths explicitly."
+    });
+  }
+
+  return issues;
+}
+
+export function validatePhaseB(phaseB: any, availRels: string[]): ModeIssue[] {
+  const issues: ModeIssue[] = [];
+
+  const summary = String(phaseB?.summary ?? "");
+  if (!summary.trim()) {
+    issues.push({ severity: "warn", code: "empty_summary", message: "Phase B <summary> is empty." });
+  }
+
+  const edits = Array.isArray(phaseB?.edits) ? phaseB.edits : [];
+  if (edits.length === 0) {
+    issues.push({ severity: "error", code: "no_edits", message: "Phase B produced zero edits." });
+    return issues; // no point continuing checks
+  }
+
+  const avail = new Set((availRels ?? []).map((x) => normalizeRel(String(x ?? ""))).filter(Boolean));
+
+  for (let i = 0; i < edits.length; i++) {
+    const e = edits[i] ?? {};
+    const file = normalizeRel(String(e.file ?? ""));
+    const diff = String(e.diff ?? "");
+
+    if (!file) {
+      issues.push({ severity: "error", code: "edit_missing_file", message: `Edit[${i}] missing <file>.` });
+      continue;
+    }
+
+    if (!avail.has(file)) {
+      issues.push({
+        severity: "error",
+        code: "edit_file_out_of_scope",
+        message: `Edit[${i}] file not in AVAILABLE FILES: ${file}`
+      });
+    }
+
+    if (!diff.trim()) {
+      issues.push({ severity: "error", code: "edit_empty_diff", message: `Edit[${i}] has empty <diff>.` });
+      continue;
+    }
+
+    if (!diff.includes("@@")) {
+      issues.push({
+        severity: "warn",
+        code: "diff_no_hunks",
+        message: `Edit[${i}] diff has no @@ hunks (may not be unified diff).`
+      });
+    }
+
+    const { oldPath, newPath, headerCount } = extractUnidiffHeaderPaths(diff);
+    if (headerCount < 2) {
+      issues.push({
+        severity: "warn",
+        code: "diff_missing_headers",
+        message: `Edit[${i}] diff missing ---/+++ headers.`
+      });
+    } else {
+      const oldN = normalizeDiffPath(oldPath);
+      const newN = normalizeDiffPath(newPath);
+
+      const candidates = [oldN, newN].filter((x) => x && x !== "/dev/null");
+      if (candidates.length && candidates.some((x) => x !== file)) {
+        issues.push({
+          severity: "warn",
+          code: "diff_header_file_mismatch",
+          message: `Edit[${i}] diff header path doesn't match <file> (${file}). headers: old=${oldN} new=${newN}`
+        });
+      }
+    }
+  }
+
+  return issues;
 }

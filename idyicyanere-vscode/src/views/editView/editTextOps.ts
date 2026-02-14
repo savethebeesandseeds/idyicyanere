@@ -1,4 +1,5 @@
 import { ProposedFile, ProposedChange } from "../../editing/pipeline/tools/types";
+import { tryApplyUnifiedDiff, renderUnifiedDiffIssues } from "../../editing/pipeline/tools/unitDiff";
 
 export type TextEol = "\n" | "\r\n";
 
@@ -9,11 +10,8 @@ export type ApplyIntegrityIssue = {
 };
 
 export function sortChanges(file: ProposedFile): ProposedChange[] {
+  // In diff-queue mode, order is strictly by "index".
   return [...(file.changes ?? [])].sort((a, b) => {
-    const ds = Number(a?.start) - Number(b?.start);
-    if (ds) return ds;
-    const de = Number(a?.end) - Number(b?.end);
-    if (de) return de;
     const di = Number(a?.index) - Number(b?.index);
     if (di) return di;
     return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
@@ -33,19 +31,22 @@ export function normalizeEol(text: string, eol: TextEol): string {
 
 /**
  * Normalize ALL proposed newText fragments to match the file's baseline EOL.
- * This prevents:
- *  - "phantom diffs" where only line endings differ
- *  - apply checks failing later because expectedBefore uses newText
+ * In diff-queue mode, `newText` is a unified diff patch, NOT file text.
+ * We intentionally do NOT rewrite it.
  */
 export function normalizeFileChangeEols(file: ProposedFile): TextEol {
   const base = file.oldText ?? "";
   const eol = detectEol(base);
-
-  for (const c of file.changes ?? []) {
-    if (typeof c?.newText === "string") c.newText = normalizeEol(c.newText, eol);
-  }
   return eol;
 }
+
+function applyDiffOrThrow(rel: string, curText: string, diff: string, changeId: string): string {
+  const sim = tryApplyUnifiedDiff({ rel, oldText: curText, diff });
+  if (sim.ok) return String(sim.afterText ?? curText);
+  const detail = renderUnifiedDiffIssues(sim.issues ?? []);
+  throw new Error(`Diff does not apply for ${rel} (change ${changeId}).\n${detail}`);
+}
+
 
 export function validateProposedFile(file: ProposedFile): ApplyIntegrityIssue[] {
   const issues: ApplyIntegrityIssue[] = [];
@@ -56,51 +57,26 @@ export function validateProposedFile(file: ProposedFile): ApplyIntegrityIssue[] 
     return issues;
   }
 
+  const rel = String(file.rel ?? "");
   const changes = sortChanges(file);
 
-  let prevEnd = -1;
+  let cur = base;
   for (const c of changes) {
-    const start = Number(c?.start);
-    const end = Number(c?.end);
-
-    if (!Number.isFinite(start) || !Number.isFinite(end)) {
-      issues.push({ severity: "error", message: "Change has non-numeric start/end.", changeId: c?.id });
-      continue;
+    if (c.discarded) continue;
+    const diff = String(c?.newText ?? "");
+    if (!diff.trim()) {
+      issues.push({ severity: "error", message: "Empty diff patch.", changeId: c.id });
+      break;
     }
-
-    if (start < 0 || end < start || end > base.length) {
+    try {
+      cur = applyDiffOrThrow(rel, cur, diff, c.id);
+    } catch (e: any) {
       issues.push({
         severity: "error",
-        message: `Change range out of bounds: [${start}..${end}] for base length ${base.length}.`,
+        message: String(e?.message ?? e),
         changeId: c.id
       });
-      continue;
-    }
-
-    if (prevEnd > start) {
-      issues.push({
-        severity: "error",
-        message: `Overlapping changes detected (prevEnd=${prevEnd} > start=${start}).`,
-        changeId: c.id
-      });
-    }
-    prevEnd = Math.max(prevEnd, end);
-
-    const slice = base.slice(start, end);
-    if (slice !== c.oldText) {
-      issues.push({
-        severity: "error",
-        message: "Baseline mismatch: change.oldText does not match baseline slice at its [start..end]. Re-run Plan changes.",
-        changeId: c.id
-      });
-    }
-
-    if (!c.discarded && c.newText === c.oldText) {
-      issues.push({
-        severity: "warn",
-        message: "Change newText equals oldText (no-op).",
-        changeId: c.id
-      });
+      break;
     }
   }
 
@@ -109,59 +85,70 @@ export function validateProposedFile(file: ProposedFile): ApplyIntegrityIssue[] 
 
 export function computeTextCurrent(file: ProposedFile): string {
   const base = file.oldText ?? "";
+  const rel = String(file.rel ?? "");
   const changes = sortChanges(file);
 
-  let out = "";
-  let cur = 0;
-
+  let cur = base;
   for (const c of changes) {
-    out += base.slice(cur, c.start);
-    if (!c.discarded && c.applied) out += c.newText;
-    else out += base.slice(c.start, c.end);
-    cur = c.end;
+    if (c.discarded) continue;
+    if (!c.applied) continue;
+    const diff = String(c?.newText ?? "");
+    cur = applyDiffOrThrow(rel, cur, diff, c.id);
   }
-
-  out += base.slice(cur);
-  return out;
+  return cur;
 }
 
 export function computeTextFinal(file: ProposedFile): string {
   const base = file.oldText ?? "";
+  const rel = String(file.rel ?? "");
   const changes = sortChanges(file);
 
-  let out = "";
-  let cur = 0;
-
+  let cur = base;
   for (const c of changes) {
-    out += base.slice(cur, c.start);
-    if (!c.discarded) out += c.newText;
-    else out += base.slice(c.start, c.end);
-    cur = c.end;
+    if (c.discarded) continue;
+    const diff = String(c?.newText ?? "");
+    cur = applyDiffOrThrow(rel, cur, diff, c.id);
   }
-
-  out += base.slice(cur);
-  return out;
+  return cur;
 }
 
 export function computeTextAfterApplyingOne(file: ProposedFile, changeId: string, overrideNewText?: string): string {
   const base = file.oldText ?? "";
+  const rel = String(file.rel ?? "");
   const changes = sortChanges(file);
 
-  let out = "";
-  let cur = 0;
-
+  let cur = base;
   for (const c of changes) {
-    out += base.slice(cur, c.start);
-
+    if (c.discarded) continue;
     const isThis = c.id === changeId;
-    const shouldApply = !c.discarded && (c.applied || isThis);
+    const shouldApply = c.applied || isThis;
+    if (!shouldApply) continue;
 
-    if (shouldApply) out += isThis && overrideNewText !== undefined ? overrideNewText : c.newText;
-    else out += base.slice(c.start, c.end);
-
-    cur = c.end;
+    const diff = isThis && overrideNewText !== undefined ? String(overrideNewText ?? "") : String(c?.newText ?? "");
+    cur = applyDiffOrThrow(rel, cur, diff, c.id);
   }
+  return cur;
+}
 
-  out += base.slice(cur);
-  return out;
+/**
+ * Preview helper: apply ALL non-discarded diffs up to and including `changeId`
+ * (even if earlier ones are not yet applied). Useful for diff previews.
+ */
+export function computeTextPreviewThrough(file: ProposedFile, changeId: string, overrideNewText?: string): string {
+  const base = file.oldText ?? "";
+  const rel = String(file.rel ?? "");
+  const changes = sortChanges(file);
+
+  const idx = changes.findIndex((c) => c.id === changeId);
+  if (idx < 0) return computeTextCurrent(file);
+
+  let cur = base;
+  for (let i = 0; i <= idx; i++) {
+    const c = changes[i];
+    if (c.discarded) continue;
+    const isThis = c.id === changeId;
+    const diff = isThis && overrideNewText !== undefined ? String(overrideNewText ?? "") : String(c?.newText ?? "");
+    cur = applyDiffOrThrow(rel, cur, diff, c.id);
+  }
+  return cur;
 }

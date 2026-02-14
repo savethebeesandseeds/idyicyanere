@@ -1,5 +1,6 @@
-import { ConfigService } from "../../storage/configService";
+import { ConfigService } from "../../../storage/configService";
 import { clampInt } from "./utils";
+import { PlannerConfig } from "./types";
 
 
 function asBool(x: any, def: boolean): boolean {
@@ -62,7 +63,7 @@ export function loadPlannerConfig(config: ConfigService): PlannerConfig {
   const modelSuperHeavy = String(modelsCfg?.modelSuperHeavy ?? "").trim() || superHeavyFallback;
 
   return {
-    trace: { enabled: asBool(traceCfg?.enabled, false) },
+    trace: { enabled: asBool(traceCfg?.enabled, true) },
 
     models: { modelLight, modelHeavy, modelSuperHeavy },
 

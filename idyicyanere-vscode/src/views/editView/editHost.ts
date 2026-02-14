@@ -1,5 +1,6 @@
 import { EditState, RunRecord } from "./editState";
 import { WebviewOut } from "./editTypes";
+import type { PlannerTraceCollector } from "../../editing/pipeline/tools/trace";
 
 export type EditHost = {
   getState(): EditState;
@@ -13,4 +14,6 @@ export type EditHost = {
 
   getActiveRun(): RunRecord | null;
   ensure_index(): Promise<void>;
+
+  getTrace?: () => PlannerTraceCollector | undefined;
 };

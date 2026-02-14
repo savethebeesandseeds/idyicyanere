@@ -31,6 +31,9 @@ export type RunRecord = {
   // Optional telemetry from v2 planner
   telemetry?: PlannerTelemetry;
 
+  // trace file location (written to workspace)
+  traceFileUri?: string;
+
   // The actual proposal
   files: ProposedFile[];
 };

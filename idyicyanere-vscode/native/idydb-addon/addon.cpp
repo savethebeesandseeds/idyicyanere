@@ -23,7 +23,7 @@ public:
       InstanceMethod("setRowsIncluded", &IdyDbWrap::SetRowsIncluded),
       InstanceMethod("ragQueryContextIncludedOnly", &IdyDbWrap::RagQueryContextIncludedOnly),
 
-      // NEW: structured hits (top-k + metadata)
+      // structured hits (top-k + metadata)
       InstanceMethod("ragQueryHitsIncludedOnly", &IdyDbWrap::RagQueryHitsIncludedOnly),
 
       InstanceMethod("deleteCell", &IdyDbWrap::DeleteCell),
@@ -363,7 +363,7 @@ private:
     );
 
     // NOTE: idydb_rag_query_topk_with_metadata returns:
-    //   n (0..k) on success, -1 on error.
+    //  n (0..k) on success, -1 on error.
     if (rc < 0) {
       for (unsigned short i = 0; i < k; i++) {
         if (outTexts[i]) idydb_free(outTexts[i]);

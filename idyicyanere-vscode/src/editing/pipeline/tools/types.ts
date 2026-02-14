@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { OpenAIService } from "../../../openai/openaiService";
+import { ConfigService} from "../../../storage/configService";
 
 export type RagHit = {
   rel: string;
@@ -20,10 +21,11 @@ export type RagStoreLike = {
 export type IncludedFile = { uri: vscode.Uri; rel: string; chunkChars: number };
 
 export type ReadTextFileResult =
-  | { ok: true; text: string }
-  | { ok: false; reason: string };
+| { ok: true; text: string }
+| { ok: false; reason: string };
 
 export type PlanMode = "plan" | "execute" | "auto";
+export type ResolvedMode = "plan" | "execute";
 
 export type PlanChangesParams = {
   prompt: string;

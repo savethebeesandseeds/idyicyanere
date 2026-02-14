@@ -1,5 +1,5 @@
 import { ProposedChange, ConsistencyIssue } from "./types";
-import { normalizeRel } from "../utils";
+import { normalizeRel } from "./utils";
 
 export function applyChangesDeterministic(params: {
   rel: string;

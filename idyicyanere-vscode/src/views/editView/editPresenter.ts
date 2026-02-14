@@ -49,8 +49,38 @@ export function buildEditViewPayload(
         planSummary: active.planSummary,
         consistencySummary: active.consistencySummary,
         issueCount: (active.consistencyIssues ?? []).length,
+        traceFileUri: active.traceFileUri,
         files: (active.files ?? []).map((f) => {
           const c = fileCounts(f);
+
+          // Changes are sequential per file (diff queue). Only the first pending is actionable.
+          const ordered = [...(f.changes ?? [])].sort((a, b) => {
+            const di = Number(a?.index) - Number(b?.index);
+            if (di) return di;
+            return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+          });
+
+          let pendingSeen = false;
+          const changesOut = ordered.map((x) => {
+            const pending = !x.discarded && !x.applied;
+            const locked = pending && pendingSeen;
+            const lockReason = locked ? "Apply/discard earlier changes in this file first." : undefined;
+            if (pending) pendingSeen = true;
+
+            return {
+              id: x.id,
+              index: x.index,
+              start: x.start,
+              end: x.end,
+              applied: x.applied,
+              discarded: x.discarded,
+              locked,
+              lockReason,
+              message: x.message,
+              newText: x.newText,
+            };
+          });
+
           return {
             uri: f.uri,
             rel: f.rel,
@@ -62,16 +92,7 @@ export function buildEditViewPayload(
             discarded: c.discarded,
             pending: c.pending,
 
-            changes: (f.changes ?? []).map((x) => ({
-              id: x.id,
-              index: x.index,
-              start: x.start,
-              end: x.end,
-              applied: x.applied,
-              discarded: x.discarded,
-              message: x.message,
-              newText: x.newText,
-            })),
+            changes: changesOut,
           };
         }),
       }

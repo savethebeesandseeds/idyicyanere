@@ -5,7 +5,7 @@
   "description": "Intelligent file editing",
   "publisher": "waajacu",
   "icon": "media/icon.png",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "categories": ["Machine Learning", "Programming Languages", "Other"],
   "keywords": ["ai", "assistant", "refactor", "code editing", "copilot", "llm", "openai"],

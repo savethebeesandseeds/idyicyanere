@@ -456,6 +456,7 @@
       <button id="btnApplyAll" class="secondary">Apply all pending</button>
       <button id="btnDiscardRun" class="secondary">Discard instruction</button>
       <button id="btnClearView" class="secondary">Clear view</button>
+      <button id="btnOpenTrace" class="secondary" disabled>Open trace</button>
     </div>
   </div>
 
@@ -666,6 +667,7 @@
     var btnApplyAll = mustGet("btnApplyAll");
     var btnDiscardRun = mustGet("btnDiscardRun");
     var btnClearView = mustGet("btnClearView");
+    var btnOpenTrace = mustGet("btnOpenTrace");
 
     var btnOpenFile = mustGet("btnOpenFile");
     var btnOpenDiff = mustGet("btnOpenDiff");
@@ -697,6 +699,7 @@
     var selectedFileUri = "";
     var selectedChangeId = "";
     var lastDiffKey = "";
+    var activeTraceUri = "";
 
     var modeSelect = mustGet("modeSelect");
     var modeHint = mustGet("modeHint");
@@ -852,6 +855,7 @@
       btnOpenDiff.disabled = true;
       btnApply.disabled = true;
       btnDiscardChange.disabled = true;
+      btnOpenTrace.disabled = true;
 
       btnClearHistory.disabled = true;
     }
@@ -1018,7 +1022,8 @@
       for (var i = 0; i < changes.length; i++){
         var c = changes[i];
         var sel = (c.id === selectedChangeId) ? " sel" : "";
-        var title = "unit #" + (c.index + 1) + " [" + c.start + ".." + c.end + "]";
+        var title = "edit #" + (c.index + 1);
+        if (c.locked) title += " (locked)";
 
         html += ''
           + '<div class="item' + sel + '" data-change="' + attrEncode(c.id) + '" title="' + esc(title) + '">'
@@ -1045,7 +1050,7 @@
       editText.placeholder = "";
       editText.value = safeString(c.newText);
 
-      var canAct = !c.applied && !c.discarded;
+      var canAct = !c.applied && !c.discarded && !c.locked;
       btnApply.disabled = !canAct;
       btnDiscardChange.disabled = !canAct;
     }
@@ -1198,7 +1203,7 @@
 
           planLists.innerHTML = listsHtml;
         } else {
-          planMain.textContent = "Could not parse a structured plan. See Raw.";
+          planMain.textContent = ps.trim() || "(no plan)";
           planLists.innerHTML = "";
         }
 
@@ -1347,6 +1352,9 @@
       btnClearView.disabled = !state.active;
       btnClearHistory.disabled = !((state.history || []).length);
 
+      // Trace button: only enable if we have a trace uri/path for this run
+      btnOpenTrace.disabled = b || !activeTraceUri;
+
       renderBusy();
       applyBusyDisables();
       maybeOpenDiffForSelection();
@@ -1390,6 +1398,12 @@
       if (isBusy()) return;
       setBusy(false, "Clearing view…");
       post({ type: "clearView" });
+    });
+
+    btnOpenTrace.addEventListener("click", function(){
+      if (isBusy()) return;
+      if (!activeTraceUri) { elStatus.textContent = "No trace file for this run."; return; }
+      post({ type: "openTrace", uri: activeTraceUri });
     });
 
     btnClearHistory.addEventListener("click", function(){
@@ -1512,6 +1526,12 @@
           active: p.active || null,
           history: Array.isArray(p.history) ? p.history : []
         };
+
+        // Prefer explicit trace field from host
+        activeTraceUri = safeString(state.active && (state.active.traceFileUri || state.active.traceFile || "") || "");
+
+        // If no active run, clear trace
+        if (!state.active) activeTraceUri = "";
 
         // 4) keep prompt field sensible
         if (!state.active) {

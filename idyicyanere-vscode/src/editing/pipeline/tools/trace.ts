@@ -1,3 +1,4 @@
+// src/editing/pipeline/trace.ts
 import { previewHeadTail } from "./utils";
 
 export type PlannerTraceStep = {
@@ -19,11 +20,8 @@ export type PlannerTrace = {
   id: string;
   createdAtMs: number;
 
-  prompt: string;
-  mode: string;
-
+  // Keep only what matters for debugging + gating behavior.
   cfg: any;
-  inputFiles: Array<{ rel: string; uri: string; chunkChars: number }>;
 
   steps: PlannerTraceStep[];
   events: PlannerTraceEvent[];
@@ -90,12 +88,7 @@ export class PlannerTraceCollector {
   readonly trace: PlannerTrace;
   private readonly opts: PruneOpts;
 
-  constructor(init: {
-    prompt: string;
-    mode: string;
-    cfg: any;
-    inputFiles: Array<{ rel: string; uri: string; chunkChars: number }>;
-  }) {
+  constructor(init: { cfg: any }) {
     this.opts = { maxStringChars: 24_000, maxArray: 600, maxKeys: 300, maxDepth: 8 };
 
     const createdAtMs = Date.now();
@@ -105,10 +98,7 @@ export class PlannerTraceCollector {
       version: 2,
       id,
       createdAtMs,
-      prompt: truncate(String(init.prompt ?? ""), 120_000),
-      mode: String(init.mode ?? ""),
       cfg: pruneRoot(init.cfg ?? {}, this.opts),
-      inputFiles: pruneRoot(init.inputFiles ?? [], this.opts),
       steps: [],
       events: []
     };

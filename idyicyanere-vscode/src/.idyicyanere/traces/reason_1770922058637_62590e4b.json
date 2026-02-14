@@ -1,0 +1,384 @@
+{
+  "version": 2,
+  "id": "reason_1770922058637_62590e4b",
+  "createdAtMs": 1770922058637,
+  "cfg": {
+    "schemaVersion": 5,
+    "logging": {
+      "level": "debug"
+    },
+    "openai": {
+      "embeddingModel": "text-embedding-3-small",
+      "modelLight": "gpt-5.1-codex-max",
+      "modelHeavy": "gpt-5.1-codex-max",
+      "modelSuperHeavy": "gpt-5.2"
+    },
+    "rag": {
+      "k": 8,
+      "maxChars": 12000,
+      "metric": "cosine"
+    },
+    "indexing": {
+      "chunkChars": 6000,
+      "maxFileBytes": 500000,
+      "excludeGlobs": [],
+      "chunking": {
+        "default": {
+          "method": "chars",
+          "chunkChars": 6000
+        },
+        "byExtension": {}
+      }
+    },
+    "contextDump": {
+      "dirName": "context_dumps",
+      "latestFileName": "indexed_context_dump.txt",
+      "keepBackups": 5,
+      "includeHidden": false,
+      "noFences": false,
+      "listOnly": false,
+      "maxFileBytes": 0,
+      "maxTotalBytes": 0,
+      "openAfterDump": true
+    },
+    "editPlanner": {
+      "trace": {
+        "enabled": true
+      },
+      "parallel": {
+        "unitChanges": 6,
+        "files": 4
+      },
+      "rag": {
+        "enabled": true,
+        "k": 12,
+        "metric": "cosine"
+      },
+      "segmentation": {
+        "newlineSnap": true,
+        "newlineSnapWindow": 800,
+        "newlinePreferForward": true,
+        "minFragmentChars": 900,
+        "maxFragmentChars": 12000,
+        "contextChars": 900
+      },
+      "targeting": {
+        "useRagHits": true,
+        "maxCandidateFiles": 60,
+        "padBeforeChars": 600,
+        "padAfterChars": 300,
+        "mergeGapChars": 200,
+        "maxWindowsPerUnit": 1
+      },
+      "attempts": {
+        "maxRounds": 3,
+        "validateModel": "light"
+      },
+      "guards": {
+        "discardWhitespaceOnlyChanges": true,
+        "preserveLineEndings": true,
+        "maxPatchCoverageWarn": 0.75,
+        "maxPatchCoverageError": 1
+      },
+      "validation": {
+        "final": "heavy"
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "phaseA_change_description",
+      "startedAtMs": 1770922058714,
+      "endedAtMs": 1770922062760,
+      "dtMs": 4046,
+      "data": {
+        "status": "done",
+        "mode": "plan",
+        "model": "superHeavy",
+        "input": "...REQUEST BEGINS...\nREQUEST CLARIFICATIONS:\n \"PROMPT\": string, the user given request.\n \"CONTEXT\": comma separated list of files, followed by their contents.\n\nPROMPT:\nMake the restitution value be 0.85 and change the last line \"waka\" to \"wika\"\n\nCONTEXT:\n\"files_list\": [\"test_file_01.txt\", \"test_file_02.txt\", \"test_file_03\"]\n\n__FILES_CONTENTS__\n...REQUEST ENDS...",
+        "instructions": "...INSTRUCTION BEGINS...\nROLE: Precise change specification module.\nGOAL: Convert the REQUEST into a specific, implementation-ready change description for downstream automation.\n\nSCHEMA (HARD): Output ONLY this shape, nothing else (no markdown/code fences; no text outside tags):\n<plan>...</plan>\n<notes>...</notes>\n\nOUTPUT CLARIFICATIONS:\n- Write the full change specification inside <plan> (later stages rely on it).\n- Use <notes> (optional) if empty just <notes></notes>.\n\nGUIDELINES:\n- SCOPE (HARD): Only describe changes within the provided AVAILABLE FILES list.\n- Use a per-file structure. Always name the file (relative path) for each change.\n- Be explicit and concrete. Avoid abstract advice.\n- For each change, include copy/paste-ready NEW text when applicable (exact code to insert/replace).\n- If you reference existing code, quote short identifying snippets (so later steps can anchor).\n- Cover every required change even if repeated across files/locations.\n\nRULES:\n- Specify every change as unified diff hunks per file (---/+++ headers, @@ hunks, with +/- lines).\n...INSTRUCTION ENDS...",
+        "output": {
+          "plan": "--- a/test_file_03\n+++ b/test_file_03\n@@\n const CONFIG = {\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n   groundY: 0,                  // ground plane at y=0\n };\n@@\n-main(); // waka\n+main(); // wika",
+          "notes": ""
+        }
+      }
+    },
+    {
+      "name": "phaseB_unit_repair_ok",
+      "startedAtMs": 1770922115630,
+      "endedAtMs": 1770922115630,
+      "dtMs": 0,
+      "data": {
+        "file": "test_file_03",
+        "idx": 0,
+        "model": "light",
+        "baselineInfo": "hash=00303d0303, lines=170, lineEnding=lf, truncated=false",
+        "input": "...REQUEST BEGINS...\nREQUEST CLARIFICATIONS:\n- Correct the DIFF so it applies cleanly to the baseline file.\n- The baseline file is authoritative. Do not guess context.\n\nTARGET FILE: test_file_03\nBASELINE INFO: hash=00303d0303, lines=170, lineEnding=lf, truncated=false\nREPAIR ATTEMPT: 3\n\nINTENDED UNIT RATIONALE (from compiler):\nAdded proper unified diff hunk headers with line ranges so the patch applies, while updating restitution to 0.85 and the trailing comment to “wika.”\n\nPHASE A PLAN (for intent, may include other files):\n--- a/test_file_03\n+++ b/test_file_03\n@@\n const CONFIG = {\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n   groundY: 0,                  // ground plane at y=0\n };\n@@\n-main(); // waka\n+main(); // wika\n\nCURRENT DIFF ATTEMPT:\n--- test_file_03\n+++ test_file_03\n@@ -13,6 +13,6 @@ const CONFIG = {\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n   groundY: 0,                  // ground plane at y=0\n };\n@@ -166,5 +166,5 @@ function main() {\n   });\n }\n \n-main(); // waka\n+main(); // wika\n\n\nAPPLY ERROR:\n#1 ERROR: Context mismatch at test_file_03:13.\natLine=13\nexpected=\"  gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\"\nfound=\"const CONFIG = {\"\ncode=context_mismatch\ncontext:\n0010|// -----------------------------\n0011|// Configuration / constants\n0012|// -----------------------------\n0013|const CONFIG = {\n0014|  gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n0015|  restitution: 0.5,            // bounce energy retention (0..1)\n0016|  linearDrag: 0.05,            // simple drag coefficient (0..)\n\nBASELINE FILE CONTENT (LINE-NUMBERED; prefix is NOT part of file):\n0001|/**\n0002| * Simple ball dynamics (2D) — position + velocity + gravity + bouncing.\n0003| * Run with: node test_file\n0004| *\n0005| * This file is in javascript\n0006| */\n0007|\n0008|\"use strict\";\n0009|\n0010|// -----------------------------\n0011|// Configuration / constants\n0012|// -----------------------------\n0013|const CONFIG = {\n0014|  gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n0015|  restitution: 0.5,            // bounce energy retention (0..1)\n0016|  linearDrag: 0.05,            // simple drag coefficient (0..)\n0017|  groundY: 0,                  // ground plane at y=0\n0018|};\n0019|\n0020|// -----------------------------\n0021|// Utility helpers\n0022|// -----------------------------\n0023|\n0024|// Create a 2D vector.\n0025|function vec(x, y) {\n0026|  return { x, y };\n0027|}\n0028|\n0029|// Add two vectors.\n0030|function add(a, b) {\n0031|  return { x: a.x + b.x, y: a.y + b.y };\n0032|}\n0033|\n0034|// Multiply vector by scalar.\n0035|function scale(v, s) {\n0036|  return { x: v.x * s, y: v.y * s };\n0037|}\n0038|\n0039|// Clamp a number between min and max.\n0040|function clamp(x, min, max) {\n0041|  return Math.max(min, Math.min(max, x));\n0042|}\n0043|\n0044|// -----------------------------\n0045|// State creation\n0046|// -----------------------------\n0047|\n0048|// Create a ball state object.\n0049|function makeBall({ position, velocity, radius, mass }) {\n0050|  return {\n0051|    position: { ...position },\n0052|    velocity: { ...velocity },\n0053|    radius,\n0054|    mass,\n0055|  };\n0056|}\n0057|\n0058|// -----------------------------\n0059|// Forces and acceleration\n0060|// -----------------------------\n0061|\n0062|// Compute external acceleration from gravity + linear drag.\n0063|// Drag is modeled as a = -k * v (very simple, stable for small dt).\n0064|function computeAcceleration(ball, cfg) {\n0065|  const g = cfg.gravity;\n0066|  const drag = scale(ball.velocity, -cfg.linearDrag);\n0067|  return add(g, drag);\n0068|}\n0069|\n0070|// -----------------------------\n0071|// Integration step\n0072|// -----------------------------\n0073|\n0074|// Advance the ball using semi-implicit Euler (a.k.a. symplectic Euler):\n0075|// v(t+dt) = v(t) + a(t)*dt\n0076|// x(t+dt) = x(t) + v(t+dt)*dt\n0077|function integrate(ball, acceleration, dt) {\n0078|  ball.velocity = add(ball.velocity, scale(acceleration, dt));\n0079|  ball.position = add(ball.position, scale(ball.velocity, dt));\n0080|}\n0081|\n0082|// -----------------------------\n0083|// Collision handling\n0084|// -----------------------------\n0085|\n0086|// Resolve collision against a flat ground plane at y = cfg.groundY.\n0087|// If ball penetrates the ground, snap it out and reflect velocity.\n0088|function resolveGroundCollision(ball, cfg) {\n0089|  const minY = cfg.groundY + ball.radius;\n0090|\n0091|  if (ball.position.y < minY) {\n0092|    // Snap out of penetration.\n0093|    ball.position.y = minY;\n0094|\n0095|    // Only bounce if moving downward.\n0096|    if (ball.velocity.y < 0) {\n0097|      ball.velocity.y = -ball.velocity.y * cfg.restitution;\n0098|    }\n0099|  }\n0100|}\n0101|\n0102|// Optional: keep the simulation within an X range by wrapping/clamping.\n0103|// (Purely for visualization/keeping numbers small in logs.)\n0104|function wrapX(ball, minX, maxX) {\n0105|  const width = maxX - minX;\n0106|  if (width <= 0) return;\n0107|\n0108|  while (ball.position.x < minX) ball.position.x += width;\n0109|  while (ball.position.x > maxX) ball.position.x -= width;\n0110|}\n0111|\n0112|// -----------------------------\n0113|// Simulation loop\n0114|// -----------------------------\n0115|\n0116|// Run the simulation for a number of steps.\n0117|function simulate(ball, cfg, dt, steps, onStep) {\n0118|  for (let i = 0; i < steps; i++) {\n0119|    const a = computeAcceleration(ball, cfg);\n0120|    integrate(ball, a, dt);\n0121|    resolveGroundCollision(ball, cfg);\n0122|\n0123|    if (onStep) onStep(i, ball);\n0124|  }\n0125|}\n0126|\n0127|// -----------------------------\n0128|// Logging / formatting\n0129|// -----------------------------\n0130|\n0131|// Format a number to a fixed width for nicer console logs.\n0132|function fmt(n, digits = 3) {\n0133|  return n.toFixed(digits).padStart(digits + 4);\n0134|}\n0135|\n0136|// Print one line of ball state.\n0137|function logState(step, ball, dt) {\n0138|  const t = step * dt;\n0139|  console.log(\n0140|    `t=${fmt(t, 2)}s | pos=(${fmt(ball.position.x)}, ${fmt(ball.position.y)}) ` +\n0141|    `vel=(${fmt(ball.velocity.x)}, ${fmt(ball.velocity.y)})`\n0142|  );\n0143|}\n0144|\n0145|// -----------------------------\n0146|// Example usage\n0147|// -----------------------------\n0148|\n0149|function main() {\n0150|  const ball = makeBall({\n0151|    position: vec(0, 2.0),         // start 2m above ground\n0152|    velocity: vec(2.5, 4.0),       // initial kick\n0153|    radius: 0.1,\n0154|    mass: 1.0,\n0155|  });\n0156|\n0157|  const dt = 1 / 60;               // 60 Hz\n0158|  const steps = 180;               // 3 seconds\n0159|\n0160|  simulate(ball, CONFIG, dt, steps, (i, b) => {\n0161|    // Keep X in a nice range for display (optional).\n0162|    wrapX(b, -5, 5);\n0163|\n0164|    // Print every 10 steps to reduce spam.\n0165|    if (i % 10 === 0) logState(i, b, dt);\n0166|  });\n0167|}\n0168|\n0169|main(); // waka\n0170|\n\n...REQUEST ENDS...",
+        "output": {
+          "file": "test_file_03",
+          "rationale": "Adjusted hunk ranges and context to match the baseline exactly while performing the intended updates: set restitution to 0.85 and change the trailing comment to “wika.”",
+          "diffChars": 351
+        }
+      }
+    },
+    {
+      "name": "phaseB_unit_split",
+      "startedAtMs": 1770922062761,
+      "endedAtMs": 1770922115630,
+      "dtMs": 52869,
+      "data": {
+        "mode": "plan",
+        "model": "heavy",
+        "input": "...REQUEST BEGINS...\nREQUEST CLARIFICATIONS:\n \"PROMPT\": contains the full change description; compile it into exact edit operations.\n \"CONTEXT\": list of files, followed by their contents.\n \"NOTES\": optional notes from Phase A.\n\nPROMPT:\n--- a/test_file_03\n+++ b/test_file_03\n@@\n const CONFIG = {\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n   groundY: 0,                  // ground plane at y=0\n };\n@@\n-main(); // waka\n+main(); // wika\n\nCONTEXT:\n\"files_list\": [\"test_file_01.txt\", \"test_file_02.txt\", \"test_file_03\"]\n\n__FILES_CONTENTS__\nNOTES:\n\"\"\n...REQUEST ENDS...",
+        "instructions": "...INSTRUCTION BEGINS...\nROLE: Change-to-Edits compiler for an automated code editor.\nGOAL: Convert the PROMPT (change description) into exact, machine-actionable edit operations.\n\nYOU ARE GIVEN:\n- PROMPT: the change description (Phase A output).\n- AVAILABLE FILES list.\n- File contents for those files.\n\nOUTPUT FORMAT (STRICT): return ONLY these tags, in this exact order. No extra text, no markdown fences.\n\n<summary>...</summary>\n<edits>\n  <edit>\n    <file>...</file>\n    <diff>...</diff>\n    <rationale>...</rationale>\n  </edit>\n  <!-- repeat <edit>...</edit> blocks as needed -->\n</edits>\n<notes>...</notes>\n\nOUTPUT CLARIFICATIONS:\n- Output ONLY the tags shown above. Do not add other tags.\n- Inside <edits>, you may output ZERO or more <edit> blocks.\n- Each <edit> MUST include exactly one <file>, one <diff>, one <rationale>.\n- <file> MUST match one of AVAILABLE FILES exactly.\n- <diff> MUST be a unified diff (unidiff) that applies to that single file.\n- <diff> MUST NOT include changes for multiple files. One <edit> == one file.\n- <rationale> should be short and concrete (use empty string if unnecessary).\n- If there are no edits, output: <edits></edits>.\n- If there are no notes, output: <notes></notes>.\n\nHARD RULES:\n1) SCOPE: Only modify files that appear in AVAILABLE FILES.\n2) VERBATIM / CONTEXT SAFETY:\n   - All context lines in the diff MUST be copied EXACTLY from the provided file contents.\n   - Do NOT invent surrounding lines. If you cannot find stable context in the provided text, DO NOT guess.\n3) NO GUESSING:\n   - If you cannot produce an exact diff that matches the provided file contents, skip that edit.\n   - Instead: add a note explaining what is missing and what exact text you expected to find.\n4) DIFF FORMAT (HARD):\n   - Use standard unified diff hunks with @@ headers.\n   - Keep hunks small and local (minimal context that is still safe).\n   - Every removal line must start with '-' and every addition line with '+'. Unchanged context lines start with ' '.\n5) PRECISION:\n   - Prefer small, local diffs over rewriting large blocks.\n6) ORDERING (IMPORTANT):\n   - For multiple edits in the same file, output them in a safe application order (typically bottom-to-top if independent).\n7) COMPLETENESS:\n   - Cover every required change even if repeated in multiple files/locations.\n\nQUALITY BAR:\n- Your output must be directly usable by a program that applies unified diffs to the specified file.\n\n...INSTRUCTION ENDS...",
+        "output": {
+          "summary": "Updated physics restitution coefficient and corrected main call comment text.",
+          "editCount": 1,
+          "edits": [
+            {
+              "file": "test_file_03",
+              "diff": "--- test_file_03\n+++ test_file_03\n@@ -14,3 +14,3 @@\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n@@ -169,1 +169,1 @@\n-main(); // waka\n+main(); // wika\n",
+              "rationale": "Adjusted hunk ranges and context to match the baseline exactly while performing the intended updates: set restitution to 0.85 and change the trailing comment to “wika.”"
+            }
+          ],
+          "notes": ""
+        }
+      }
+    },
+    {
+      "name": "phaseC_finalize_done",
+      "startedAtMs": 1770922115633,
+      "endedAtMs": 1770922115639,
+      "dtMs": 6,
+      "data": {
+        "summary": "finalized files=1, applyFailures=0, syntaxFailures=0, ok=true",
+        "ok": true,
+        "files": [
+          {
+            "rel": "test_file_03",
+            "applyOk": true,
+            "syntaxOk": true,
+            "beforeHash": "00303d0303",
+            "afterHash": "00407b8e61",
+            "editCount": 1,
+            "syntaxErrCount": 0
+          }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "pipeline_start",
+      "atMs": 1770922058713,
+      "data": {
+        "startedAtMs": 1770922058713,
+        "modeKind": "plan",
+        "parallelUnits": 4,
+        "max_attempt": 2,
+        "promptChars": 76,
+        "promptPreview": {
+          "head": "Make the restitution value be 0.85 and change the last line \"waka\" to \"wika\"",
+          "tail": ""
+        },
+        "cfg": {
+          "schemaVersion": 5,
+          "logging": {
+            "level": "debug"
+          },
+          "openai": {
+            "embeddingModel": "text-embedding-3-small",
+            "modelLight": "gpt-5.1-codex-max",
+            "modelHeavy": "gpt-5.1-codex-max",
+            "modelSuperHeavy": "gpt-5.2"
+          },
+          "rag": {
+            "k": 8,
+            "maxChars": 12000,
+            "metric": "cosine"
+          },
+          "indexing": {
+            "chunkChars": 6000,
+            "maxFileBytes": 500000,
+            "excludeGlobs": [],
+            "chunking": {
+              "default": {
+                "method": "chars",
+                "chunkChars": 6000
+              },
+              "byExtension": {}
+            }
+          },
+          "contextDump": {
+            "dirName": "context_dumps",
+            "latestFileName": "indexed_context_dump.txt",
+            "keepBackups": 5,
+            "includeHidden": false,
+            "noFences": false,
+            "listOnly": false,
+            "maxFileBytes": 0,
+            "maxTotalBytes": 0,
+            "openAfterDump": true
+          },
+          "editPlanner": {
+            "trace": {
+              "enabled": true
+            },
+            "parallel": {
+              "unitChanges": 6,
+              "files": 4
+            },
+            "rag": {
+              "enabled": true,
+              "k": 12,
+              "metric": "cosine"
+            },
+            "segmentation": {
+              "newlineSnap": true,
+              "newlineSnapWindow": 800,
+              "newlinePreferForward": true,
+              "minFragmentChars": 900,
+              "maxFragmentChars": 12000,
+              "contextChars": 900
+            },
+            "targeting": {
+              "useRagHits": true,
+              "maxCandidateFiles": 60,
+              "padBeforeChars": 600,
+              "padAfterChars": 300,
+              "mergeGapChars": 200,
+              "maxWindowsPerUnit": 1
+            },
+            "attempts": {
+              "maxRounds": 3,
+              "validateModel": "light"
+            },
+            "guards": {
+              "discardWhitespaceOnlyChanges": true,
+              "preserveLineEndings": true,
+              "maxPatchCoverageWarn": 0.75,
+              "maxPatchCoverageError": 1
+            },
+            "validation": {
+              "final": "heavy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "pipeline_phaseA_start",
+      "atMs": 1770922058714,
+      "data": {
+        "atMs": 1770922058714,
+        "modekind": "plan"
+      }
+    },
+    {
+      "name": "pipeline_phaseA_done",
+      "atMs": 1770922062760,
+      "data": {
+        "ms": 4046,
+        "phaseA": {
+          "plan": "--- a/test_file_03\n+++ b/test_file_03\n@@\n const CONFIG = {\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n   groundY: 0,                  // ground plane at y=0\n };\n@@\n-main(); // waka\n+main(); // wika",
+          "notes": ""
+        },
+        "phaseA_planPreview": {
+          "head": "--- a/test_file_03\n+++ b/test_file_03\n@@\n const CONFIG = {\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n   groundY: 0,                  // ground plane at y=0\n };\n@@\n-main(); // waka\n+main(); // wika",
+          "tail": ""
+        },
+        "phaseA_planChars": 399
+      }
+    },
+    {
+      "name": "mode_validation",
+      "atMs": 1770922062760,
+      "data": {
+        "phase": "phaseA",
+        "ok": true,
+        "issueCount": 0,
+        "issues": []
+      }
+    },
+    {
+      "name": "pipeline_phaseB_start",
+      "atMs": 1770922062761,
+      "data": {
+        "atMs": 1770922062761
+      }
+    },
+    {
+      "name": "pipeline_phaseB_done",
+      "atMs": 1770922115631,
+      "data": {
+        "ms": 52869,
+        "phaseB": {
+          "summary": "Updated physics restitution coefficient and corrected main call comment text.",
+          "edits": [
+            {
+              "file": "test_file_03",
+              "diff": "--- test_file_03\n+++ test_file_03\n@@ -14,3 +14,3 @@\n   gravity: { x: 0, y: -9.81 }, // m/s^2 (y up)\n-  restitution: 0.5,            // bounce energy retention (0..1)\n+  restitution: 0.85,           // bounce energy retention (0..1)\n   linearDrag: 0.05,            // simple drag coefficient (0..)\n@@ -169,1 +169,1 @@\n-main(); // waka\n+main(); // wika\n",
+              "rationale": "Adjusted hunk ranges and context to match the baseline exactly while performing the intended updates: set restitution to 0.85 and change the trailing comment to “wika.”"
+            }
+          ],
+          "notes": ""
+        },
+        "editCount": 1,
+        "files": [
+          {
+            "file": "test_file_03",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "mode_validation",
+      "atMs": 1770922115631,
+      "data": {
+        "phase": "phaseB",
+        "ok": true,
+        "issueCount": 0,
+        "issues": []
+      }
+    },
+    {
+      "name": "pipeline_phaseC_start",
+      "atMs": 1770922115632,
+      "data": {
+        "atMs": 1770922115632,
+        "editCount": 1
+      }
+    },
+    {
+      "name": "pipeline_phaseC_done",
+      "atMs": 1770922115639,
+      "data": {
+        "ms": 7,
+        "ok": true,
+        "summary": "finalized files=1, applyFailures=0, syntaxFailures=0, ok=true",
+        "fileCount": 1,
+        "files": [
+          {
+            "rel": "test_file_03",
+            "applyOk": true,
+            "syntaxOk": true,
+            "editCount": 1,
+            "beforeHash": "00303d0303",
+            "afterHash": "00407b8e61"
+          }
+        ]
+      }
+    },
+    {
+      "name": "mode_validation",
+      "atMs": 1770922115639,
+      "data": {
+        "phase": "phaseC",
+        "ok": true,
+        "issueCount": 0,
+        "issues": []
+      }
+    }
+  ]
+}
