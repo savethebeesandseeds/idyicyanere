@@ -29,8 +29,9 @@ export async function build_input_CHANGE_DESCRIPTION(
     "PROMPT:",
     c0.prompt,
     '',
+    "AVAILABLE FILES:",
+    `[${filesList.map((x) => JSON.stringify(x)).join(", ")}]`,
     "CONTEXT:",
-    `"files_list": [${filesList.map((x) => JSON.stringify(x)).join(", ")}]`,
     '',
     '__FILES_CONTENTS__',
     "...REQUEST ENDS..."
@@ -64,7 +65,10 @@ export async function build_instructions_CHANGE_DESCRIPTION(
     "- Cover every required change even if repeated across files/locations.",
     "",
     "RULES:",
-    "- Specify every change as unified diff hunks per file (---/+++ headers, @@ hunks, with +/- lines).",
+    "- Specify every change as a DIFF-LIKE PATCH per file (---/+++ headers, @@ blocks, with +/- lines).",
+    "- MAY omit line ranges in @@ headers (you may use bare '@@' as a section marker).",
+    "- DO NOT use '...' anywhere inside patches. Use real context lines instead (copied from the provided file snippets).",
+    "- Each patch must include at least 2 unchanged context lines before and after the changed lines (lines starting with a single space).",
     "...INSTRUCTION ENDS..."
   ].join("\n");
 }
@@ -151,6 +155,7 @@ export async function build_instructions_UNIT_SPLIT(
     "GOAL: Convert the PROMPT (change description) into exact, machine-actionable edit operations.",
     "",
     "YOU ARE GIVEN:",
+    "- IMPORTANT: patches may be diff-like and may omit @@ line ranges; your job is to compile them into a VALID unified diff that applies to the provided file contents.",
     "- PROMPT: the change description (Phase A output).",
     "- AVAILABLE FILES list.",
     "- File contents for those files.",
@@ -183,6 +188,7 @@ export async function build_instructions_UNIT_SPLIT(
     "1) SCOPE: Only modify files that appear in AVAILABLE FILES.",
     "2) VERBATIM / CONTEXT SAFETY:",
     "   - All context lines in the diff MUST be copied EXACTLY from the provided file contents.",
+    "   - Placeholders like '...' or does not provide real context, REPLACE those placeholders and use the actual file contents to construct safe hunks.",
     "   - Do NOT invent surrounding lines. If you cannot find stable context in the provided text, DO NOT guess.",
     "3) NO GUESSING:",
     "   - If you cannot produce an exact diff that matches the provided file contents, skip that edit.",
@@ -190,6 +196,7 @@ export async function build_instructions_UNIT_SPLIT(
     "4) DIFF FORMAT (HARD):",
     "   - Use standard unified diff hunks with @@ headers.",
     "   - Keep hunks small and local (minimal context that is still safe).",
+    "   - Every @@ hunk header MUST include real line ranges: '@@ -l,s +l,s @@'. (Do not output bare '@@'.)",
     "   - Every removal line must start with '-' and every addition line with '+'. Unchanged context lines start with ' '.",
     "5) PRECISION:",
     "   - Prefer small, local diffs over rewriting large blocks.",
@@ -234,6 +241,9 @@ export async function build_instructions_UNIT_EDIT_REPAIR(): Promise<string> {
     "3) Keep edits minimal and local.",
     "4) Always wrap the diff in CDATA. The CDATA content must start directly with '---' (no leading blank line).",
     "5) If you truly cannot produce an applying diff, output <diff></diff> and explain precisely why in <rationale>.",
+    "6) If APPLY ERROR mentions 'bad_hunk_header' or 'no_hunks', the diff is not valid unidiff.",
+    "   - Fix by producing proper hunk headers with ranges: '@@ -l,s +l,s @@'.",
+    "   - Use the BASELINE LINE NUMBERS to compute l and s (do NOT guess).",
     "",
     "...INSTRUCTION ENDS..."
   ].join("\n");
@@ -309,6 +319,7 @@ export async function build_instructions_FILE_SYNTAX_REPAIR(): Promise<string> {
     "4) Keep patch minimal and local.",
     "5) Always wrap the diff in CDATA. The CDATA content must start directly with '---' (no leading blank line).",
     "6) If you truly cannot fix, output <diff></diff> and explain why in <rationale>.",
+    "7) HUNK HEADERS (HARD): Never output bare '@@'. Every hunk header must be '@@ -<int>,<int> +<int>,<int> @@'.",
     "",
     "...INSTRUCTION ENDS..."
   ].join("\n");

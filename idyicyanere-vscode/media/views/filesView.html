@@ -18,7 +18,7 @@
       --mono: var(--vscode-editor-font-family);
 
       /* compact sizes */
-      --rowPadY: 3px;
+      --rowPadY: 2px;
       --rowPadX: 8px;
       --cellGap: 8px;
 
@@ -150,7 +150,7 @@
       padding: var(--rowPadY) var(--rowPadX);
       border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
       font-size: 12px;
-      line-height: 1.1;
+      line-height: 1.05;
       cursor: default;
     }
     .tr:last-child{ border-bottom:none; }
@@ -162,20 +162,42 @@
     }
 
     .twisty{
-      width: var(--tw); height: var(--tw);
+      width: var(--tw);
+      height: var(--tw);
       border-radius: 6px;
       border: 1px solid var(--vscode-editorWidget-border);
       background: transparent;
       color: var(--muted);
-      display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer;
-      user-select:none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
       padding: 0;
       line-height: 1;
       flex: 0 0 auto;
     }
-    .twisty:hover{ background: color-mix(in srgb, var(--vscode-button-background) 18%, transparent); }
-    .twisty.none{ opacity:0; pointer-events:none; }
+
+    .twisty:hover{
+      background: color-mix(in srgb, var(--vscode-button-background) 18%, transparent);
+    }
+
+    /* folders that have no chevron (keeps alignment but hides glyph) */
+    .twisty.none{
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* files: do NOT reserve twisty width (this fixes indentation) */
+    .twisty.fileSpacer{
+      width: 0;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      opacity: 0;
+      pointer-events: none;
+      flex: 0 0 0;
+    }
 
     .label{
       font-family: var(--mono);
@@ -248,6 +270,11 @@
     /* file rows look clickable */
     .row-file{ cursor: pointer; }
     .row-folder, .row-root{ cursor: pointer; }
+    /* Subtle base tint for files (very light) */
+    .row-file{
+      background: color-mix(in srgb, var(--vscode-list-hoverBackground) 8%, transparent);
+    }
+
   </style>
 </head>
 
@@ -337,7 +364,12 @@
 
     function twistyHtml(node){
       const r = node.row;
-      if (r.kind === 'file') return '<span class="twisty none">›</span>';
+
+      // Files: no twisty slot width (so filenames align with folder twisty column).
+      if (r.kind === 'file') {
+        return '<span class="twisty fileSpacer" aria-hidden="true"></span>';
+      }
+
       const isOpen = !!node.expanded;
       const isLoading = !!node.loading;
       const glyph = isLoading ? '…' : (isOpen ? '⌄' : '›');
@@ -510,7 +542,7 @@
         return `
           <div class="tr ${rowCls} ${hintCls}" role="row" data-uri="${esc(r.uri)}" data-kind="${esc(r.kind)}">
             <div class="nameCell" role="cell" title="${esc(r.rel)}">
-              <span style="display:inline-block; width:${depth*12}px;"></span>
+              <span style="display:inline-block; width:${depth*16}px;"></span>
               ${twistyHtml(node)}
               <div class="label">${esc(r.name)}</div>
             </div>

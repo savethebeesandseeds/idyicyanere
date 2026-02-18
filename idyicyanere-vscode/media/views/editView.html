@@ -724,16 +724,25 @@
       var a = state && state.active;
       if (!a) return false;
 
-      // If your host sets a.status / a.phase, we honor it.
+      // If we can see an error state anywhere, do NOT keep the UI locked.
       var aStatus = String(a.status || a.phase || "").toLowerCase();
+      if (aStatus === "error" || aStatus === "failed") return false;
+
+      // If any file is in error, we consider the run "done enough" to unlock UI.
+      var files = a.files || [];
+      for (var i = 0; i < files.length; i++){
+        var s = String(files[i].status || "").toLowerCase();
+        if (s === "error" || s === "failed") return false;
+      }
+
+      // Normal busy markers
       if (aStatus === "planning" || aStatus === "running" || aStatus === "applying") return true;
 
-      // Streaming-friendly: mark busy if any file is still being processed.
-      var files = a.files || [];
       for (var i = 0; i < files.length; i++){
         var s = String(files[i].status || "").toLowerCase();
         if (s === "planning" || s === "running" || s === "applying") return true;
       }
+
       return false;
     }
 
@@ -855,7 +864,9 @@
       btnOpenDiff.disabled = true;
       btnApply.disabled = true;
       btnDiscardChange.disabled = true;
-      btnOpenTrace.disabled = true;
+      
+      // Allow opening trace even while busy (crucial for debugging failures).
+      btnOpenTrace.disabled = !activeTraceUri;
 
       btnClearHistory.disabled = true;
     }
@@ -1401,8 +1412,8 @@
     });
 
     btnOpenTrace.addEventListener("click", function(){
-      if (isBusy()) return;
       if (!activeTraceUri) { elStatus.textContent = "No trace file for this run."; return; }
+      // Allow even while busy.
       post({ type: "openTrace", uri: activeTraceUri });
     });
 

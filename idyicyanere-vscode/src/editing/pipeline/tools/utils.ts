@@ -77,8 +77,76 @@ export function normalizeRel(rel: string): string {
   return String(rel ?? "").replace(/\\/g, "/").trim();
 }
 
-export function errMsg(e: any): string {
-  return (e?.message ?? String(e ?? "error")).trim();
+export function errMsg(e: unknown): string {
+  try {
+    if (e == null) return "error";
+
+    // If it's already a string
+    if (typeof e === "string") return e.trim() || "error";
+
+    // Real Error (or subclass)
+    if (e instanceof Error) {
+      const msg = (e.message || e.name || "error").trim();
+      return msg || "error";
+    }
+
+    // Common "error-like" object shapes
+    if (typeof e === "object") {
+      const anyE = e as any;
+
+      // message could be non-string
+      if (anyE.message != null) {
+        if (typeof anyE.message === "string") return anyE.message.trim() || "error";
+        return errMsg(anyE.message);
+      }
+
+      // nested error
+      if (anyE.error != null) return errMsg(anyE.error);
+
+      // arrays of errors
+      if (Array.isArray(anyE.errors)) {
+        const parts = anyE.errors.map(errMsg).filter(Boolean);
+        if (parts.length) return parts.join("; ");
+      }
+
+      // Axios/fetch-ish: response/data
+      if (anyE.response?.data != null) {
+        const m = errMsg(anyE.response.data);
+        if (m && m !== "error") return m;
+      }
+      if (anyE.data != null) {
+        const m = errMsg(anyE.data);
+        if (m && m !== "error") return m;
+      }
+
+      // Last resort: safe JSON stringify
+      const seen = new WeakSet<object>();
+      const s = JSON.stringify(
+        anyE,
+        (_k, v) => {
+          if (typeof v === "bigint") return v.toString();
+          if (typeof v === "object" && v !== null) {
+            if (seen.has(v)) return "[Circular]";
+            seen.add(v);
+          }
+          if (typeof v === "function") return `[Function ${(v as Function).name || "anonymous"}]`;
+          return v;
+        },
+        2
+      );
+
+      if (s && s !== "{}") return s.trim();
+
+      // If JSON gives nothing useful, fall back to toString (may still be [object Object])
+      const t = (anyE as any).toString?.();
+      return (typeof t === "string" && t.trim() && t !== "[object Object]") ? t.trim() : "error";
+    }
+
+    // numbers, booleans, symbols, etc.
+    return String(e).trim() || "error";
+  } catch {
+    return "error";
+  }
 }
 
 export function sevRank(sev: "warn" | "error"): number {

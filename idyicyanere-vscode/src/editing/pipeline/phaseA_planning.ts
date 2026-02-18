@@ -73,6 +73,6 @@ export async function buildChangeDescription(params: {
     params.mode.diag?.push(`Change description failed: ${msg}`);
     params.mode.trace?.addEvent("phaseA_change_description_failed", { msg });
 
-    throw("<phaseA_planning> failed...");
+    throw(`<phaseA_planning> failed... ${ msg }`);
   }
 }

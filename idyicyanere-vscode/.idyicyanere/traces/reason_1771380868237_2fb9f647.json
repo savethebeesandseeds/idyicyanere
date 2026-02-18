@@ -1,0 +1,315 @@
+{
+  "version": 2,
+  "id": "reason_1771380868237_2fb9f647",
+  "createdAtMs": 1771380868237,
+  "cfg": {
+    "schemaVersion": 6,
+    "logging": {
+      "level": "debug"
+    },
+    "openai": {
+      "embeddingModel": "text-embedding-3-small",
+      "modelLight": "gpt-5.1-codex-max",
+      "modelHeavy": "gpt-5.1-codex-max",
+      "modelSuperHeavy": "gpt-5.2"
+    },
+    "rag": {
+      "k": 6,
+      "maxChars": 12000,
+      "metric": "cosine"
+    },
+    "indexing": {
+      "chunkChars": 6000,
+      "maxFileBytes": 500000,
+      "excludeGlobs": [],
+      "chunking": {
+        "default": {
+          "method": "chars",
+          "chunkChars": 6000
+        },
+        "byExtension": {}
+      }
+    },
+    "contextDump": {
+      "dirName": "context_dumps",
+      "latestFileName": "indexed_context_dump.txt",
+      "keepBackups": 5,
+      "includeHidden": false,
+      "noFences": false,
+      "listOnly": false,
+      "maxFileBytes": 0,
+      "maxTotalBytes": 0,
+      "openAfterDump": true
+    },
+    "filesView": {
+      "useVscodeExcludes": true,
+      "excludeGlobs": [
+        "**/.git/**",
+        "**/.hg/**",
+        "**/.svn/**",
+        "**/.idea/**",
+        "**/.vscode/**",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/out/**",
+        "**/.next/**",
+        "**/.nuxt/**",
+        "**/.cache/**",
+        "**/.turbo/**",
+        "**/.vercel/**",
+        "**/coverage/**",
+        "**/target/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/.DS_Store",
+        "**/Thumbs.db"
+      ]
+    },
+    "editPlanner": {
+      "trace": {
+        "enabled": true
+      },
+      "parallel": {
+        "unitChanges": 6,
+        "files": 4
+      },
+      "rag": {
+        "enabled": true,
+        "k": 12,
+        "metric": "cosine"
+      },
+      "segmentation": {
+        "newlineSnap": true,
+        "newlineSnapWindow": 800,
+        "newlinePreferForward": true,
+        "minFragmentChars": 900,
+        "maxFragmentChars": 12000,
+        "contextChars": 900
+      },
+      "targeting": {
+        "useRagHits": true,
+        "maxCandidateFiles": 60,
+        "padBeforeChars": 600,
+        "padAfterChars": 300,
+        "mergeGapChars": 200,
+        "maxWindowsPerUnit": 1
+      },
+      "attempts": {
+        "maxRounds": 3,
+        "validateModel": "light"
+      },
+      "guards": {
+        "discardWhitespaceOnlyChanges": true,
+        "preserveLineEndings": true,
+        "maxPatchCoverageWarn": 0.75,
+        "maxPatchCoverageError": 1
+      },
+      "validation": {
+        "final": "heavy"
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "phaseA_change_description",
+      "startedAtMs": 1771380868304,
+      "endedAtMs": 1771380873081,
+      "dtMs": 4777,
+      "data": {
+        "status": "done",
+        "mode": "plan",
+        "model": "superHeavy",
+        "input": "...REQUEST BEGINS...\nREQUEST CLARIFICATIONS:\n \"PROMPT\": string, the user given request.\n \"CONTEXT\": comma separated list of files, followed by their contents.\n\nPROMPT:\nThe change is easy enough, see, when the files are listed alongside the folders, they are comming in the same identation level, this is correct, but it seems we do a trick to display the > sign, and we push the files to the right in order to compensate for the > sign. \n\nAnyway, the problem is that, we want the filenames to start at the begining with > not jump to where the foldername begins.\n\nCONTEXT:\n\"files_list\": [\"media/views/filesView.html\"]\n\n__FILES_CONTENTS__\n...REQUEST ENDS...",
+        "instructions": "...INSTRUCTION BEGINS...\nROLE: Precise change specification module.\nGOAL: Convert the REQUEST into a specific, implementation-ready change description for downstream automation.\n\nSCHEMA (HARD): Output ONLY this shape, nothing else (no markdown/code fences; no text outside tags):\n<plan>...</plan>\n<notes>...</notes>\n\nOUTPUT CLARIFICATIONS:\n- Write the full change specification inside <plan> (later stages rely on it).\n- Use <notes> (optional) if empty just <notes></notes>.\n\nGUIDELINES:\n- SCOPE (HARD): Only describe changes within the provided AVAILABLE FILES list.\n- Use a per-file structure. Always name the file (relative path) for each change.\n- Be explicit and concrete. Avoid abstract advice.\n- For each change, include copy/paste-ready NEW text when applicable (exact code to insert/replace).\n- If you reference existing code, quote short identifying snippets (so later steps can anchor).\n- Cover every required change even if repeated across files/locations.\n\nRULES:\n- Specify every change as unified diff hunks per file (---/+++ headers, @@ hunks, with +/- lines).\n...INSTRUCTION ENDS...",
+        "output": {
+          "plan": "--- a/media/views/filesView.html\n+++ b/media/views/filesView.html\n@@\n     function render(){\n       const list = visibleList();\n       count.textContent = String(list.length);\n \n       body.innerHTML = list.map(node => {\n         const r = node.row;\n         const depth = node.depth || 0;\n@@\n         const hintCls = hintKind ? hintClassFor(hintKind) : '';\n         const rowCls = (r.kind === 'file') ? 'row-file' : (r.kind === 'root' ? 'row-root' : 'row-folder');\n \n         return `\n           <div class=\"tr ${rowCls} ${hintCls}\" role=\"row\" data-uri=\"${esc(r.uri)}\" data-kind=\"${esc(r.kind)}\">\n             <div class=\"nameCell\" role=\"cell\" title=\"${esc(r.rel)}\">\n               <span style=\"display:inline-block; width:${depth*12}px;\"></span>\n-              ${twistyHtml(node)}\n+              ${(r.kind === 'file') ? '<span class=\"twisty none\">›</span>' : twistyHtml(node)}\n               <div class=\"label\">${esc(r.name)}</div>\n             </div>\n             <div role=\"cell\">${statusCell}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(r.chunking || '')}\">${esc(r.chunking || '')}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(fmtBytes(r.sizeBytes))}\">${esc(fmtBytes(r.sizeBytes))}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(r.ext || '')}\">${esc(r.ext || '')}</div>\n             <div class=\"actions\" role=\"cell\">${actionsHtml(node)}</div>\n           </div>\n         `;\n       }).join('');\n     }",
+          "notes": ""
+        }
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "pipeline_start",
+      "atMs": 1771380868304,
+      "data": {
+        "startedAtMs": 1771380868303,
+        "modeKind": "plan",
+        "parallelUnits": 4,
+        "max_attempt": 2,
+        "promptChars": 394,
+        "promptPreview": {
+          "head": "The change is easy enough, see, when the files are listed alongside the folders, they are comming in the same identation level, this is correct, but it seems we do a trick to display the > sign, and we push the files to the right in order to compensate for the > sign. \n\nAnyway, the problem is that, we want the filenames to start at the begining with > not jump to where the foldername begins.",
+          "tail": ""
+        },
+        "cfg": {
+          "schemaVersion": 6,
+          "logging": {
+            "level": "debug"
+          },
+          "openai": {
+            "embeddingModel": "text-embedding-3-small",
+            "modelLight": "gpt-5.1-codex-max",
+            "modelHeavy": "gpt-5.1-codex-max",
+            "modelSuperHeavy": "gpt-5.2"
+          },
+          "rag": {
+            "k": 6,
+            "maxChars": 12000,
+            "metric": "cosine"
+          },
+          "indexing": {
+            "chunkChars": 6000,
+            "maxFileBytes": 500000,
+            "excludeGlobs": [],
+            "chunking": {
+              "default": {
+                "method": "chars",
+                "chunkChars": 6000
+              },
+              "byExtension": {}
+            }
+          },
+          "contextDump": {
+            "dirName": "context_dumps",
+            "latestFileName": "indexed_context_dump.txt",
+            "keepBackups": 5,
+            "includeHidden": false,
+            "noFences": false,
+            "listOnly": false,
+            "maxFileBytes": 0,
+            "maxTotalBytes": 0,
+            "openAfterDump": true
+          },
+          "filesView": {
+            "useVscodeExcludes": true,
+            "excludeGlobs": [
+              "**/.git/**",
+              "**/.hg/**",
+              "**/.svn/**",
+              "**/.idea/**",
+              "**/.vscode/**",
+              "**/node_modules/**",
+              "**/dist/**",
+              "**/build/**",
+              "**/out/**",
+              "**/.next/**",
+              "**/.nuxt/**",
+              "**/.cache/**",
+              "**/.turbo/**",
+              "**/.vercel/**",
+              "**/coverage/**",
+              "**/target/**",
+              "**/.venv/**",
+              "**/venv/**",
+              "**/__pycache__/**",
+              "**/.DS_Store",
+              "**/Thumbs.db"
+            ]
+          },
+          "editPlanner": {
+            "trace": {
+              "enabled": true
+            },
+            "parallel": {
+              "unitChanges": 6,
+              "files": 4
+            },
+            "rag": {
+              "enabled": true,
+              "k": 12,
+              "metric": "cosine"
+            },
+            "segmentation": {
+              "newlineSnap": true,
+              "newlineSnapWindow": 800,
+              "newlinePreferForward": true,
+              "minFragmentChars": 900,
+              "maxFragmentChars": 12000,
+              "contextChars": 900
+            },
+            "targeting": {
+              "useRagHits": true,
+              "maxCandidateFiles": 60,
+              "padBeforeChars": 600,
+              "padAfterChars": 300,
+              "mergeGapChars": 200,
+              "maxWindowsPerUnit": 1
+            },
+            "attempts": {
+              "maxRounds": 3,
+              "validateModel": "light"
+            },
+            "guards": {
+              "discardWhitespaceOnlyChanges": true,
+              "preserveLineEndings": true,
+              "maxPatchCoverageWarn": 0.75,
+              "maxPatchCoverageError": 1
+            },
+            "validation": {
+              "final": "heavy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "pipeline_phaseA_start",
+      "atMs": 1771380868304,
+      "data": {
+        "atMs": 1771380868304,
+        "modekind": "plan"
+      }
+    },
+    {
+      "name": "pipeline_phaseA_done",
+      "atMs": 1771380873081,
+      "data": {
+        "ms": 4777,
+        "phaseA": {
+          "plan": "--- a/media/views/filesView.html\n+++ b/media/views/filesView.html\n@@\n     function render(){\n       const list = visibleList();\n       count.textContent = String(list.length);\n \n       body.innerHTML = list.map(node => {\n         const r = node.row;\n         const depth = node.depth || 0;\n@@\n         const hintCls = hintKind ? hintClassFor(hintKind) : '';\n         const rowCls = (r.kind === 'file') ? 'row-file' : (r.kind === 'root' ? 'row-root' : 'row-folder');\n \n         return `\n           <div class=\"tr ${rowCls} ${hintCls}\" role=\"row\" data-uri=\"${esc(r.uri)}\" data-kind=\"${esc(r.kind)}\">\n             <div class=\"nameCell\" role=\"cell\" title=\"${esc(r.rel)}\">\n               <span style=\"display:inline-block; width:${depth*12}px;\"></span>\n-              ${twistyHtml(node)}\n+              ${(r.kind === 'file') ? '<span class=\"twisty none\">›</span>' : twistyHtml(node)}\n               <div class=\"label\">${esc(r.name)}</div>\n             </div>\n             <div role=\"cell\">${statusCell}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(r.chunking || '')}\">${esc(r.chunking || '')}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(fmtBytes(r.sizeBytes))}\">${esc(fmtBytes(r.sizeBytes))}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(r.ext || '')}\">${esc(r.ext || '')}</div>\n             <div class=\"actions\" role=\"cell\">${actionsHtml(node)}</div>\n           </div>\n         `;\n       }).join('');\n     }",
+          "notes": ""
+        },
+        "phaseA_planPreview": {
+          "head": "--- a/media/views/filesView.html\n+++ b/media/views/filesView.html\n@@\n     function render(){\n       const list = visibleList();\n       count.textContent = String(list.length);\n \n       body.innerHTML = list.map(node => {\n         const r = node.row;\n         const depth = node.depth || 0;\n@@\n         const hintCls = hintKind ? hintClassFor(hintKind) : '';\n         const rowCls = (r.kind === 'file') ? 'row-file' : (r.kind === 'root' ? 'row-root' : 'row-folder');\n \n         return `\n           <div class=\"tr ${rowCls} ${hintCls}\" role=\"row\" data-uri=\"${esc(r.uri)}\" data-kind=\"${esc(r.kind)}\">\n             <div class=\"nameCell\" role=\"cell\" title=\"${esc(r.rel)}\">\n               <span style=\"display:inline-block; width:${depth*12}px;\"></span>\n-              ${twistyHtml(node)}\n+              ${(r.kind === 'file') ? '<span class=\"twisty none\">›</span>' : twistyHtml(node)}\n               <div class=\"label\">${esc(r.name)}</div>\n             </div>\n             <div role=\"cell\">${statusCell}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(r.chunking || '')}\">${esc(r.chunking || '')}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(fmtBytes(r.sizeBytes))}\">${esc(fmtBytes(r.sizeBytes))}</div>\n             <div class=\"mono\" role=\"cell\" title=\"${esc(r.ext || '')}\">${esc(r.ext || '')}</div>\n             <div class=\"actions\" role=\"cell\">${actionsHtml(node)}</div>\n           </div>\n         `;\n       }).join('');\n     }",
+          "tail": ""
+        },
+        "phaseA_planChars": 1454
+      }
+    },
+    {
+      "name": "mode_validation",
+      "atMs": 1771380873081,
+      "data": {
+        "phase": "phaseA",
+        "ok": true,
+        "issueCount": 0,
+        "issues": []
+      }
+    },
+    {
+      "name": "pipeline_phaseB_start",
+      "atMs": 1771380873081,
+      "data": {
+        "atMs": 1771380873081
+      }
+    },
+    {
+      "name": "phaseB_compile_or_repair_failed",
+      "atMs": 1771380890678,
+      "data": {
+        "msg": "[phaseB.5] Failed to repair diff for media/views/filesView.html (edit[0] within fileQueueIndex=0) after 3 round(s).\nLast error:\n#1 ERROR: Bad hunk header: @@\ncode=bad_hunk_header\n\n#2 ERROR: No @@ hunks found in diff (not a unified diff, or missing hunks).\ncode=no_hunks",
+        "stack": "Error: [phaseB.5] Failed to repair diff for media/views/filesView.html (edit[0] within fileQueueIndex=0) after 3 round(s).\nLast error:\n#1 ERROR: Bad hunk header: @@\ncode=bad_hunk_header\n\n#2 ERROR: No @@ hunks found in diff (not a unified diff, or missing hunks).\ncode=no_hunks\n\tat /root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:526:2720\n\tat process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n\tat async /root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:499:1323\n\tat async Promise.all (index 0)\n\tat async Kee (/root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:499:1347)\n\tat async pJe (/root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:526:1455)\n\tat async kbe (/root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:530:6833)\n\tat async /root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:531:3911\n\tat async /root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:541:8297\n\tat async PJe (/root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:531:2501)\n\tat async /root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:541:5645\n\tat async cte.guard (/root/.vscode-server/extensions/waajacu.idyicyanere-0.4.0/dist/extension.js:541:3808)"
+      }
+    },
+    {
+      "name": "pipeline_phaseB_failed",
+      "atMs": 1771380890678,
+      "data": {
+        "msg": "<phaseB_unitChanges> failed: [phaseB.5] Failed to repair diff for media/views/filesView.html (edit[0] within fileQueueIndex=0) after 3 round(s).\nLast error:\n#1 ERROR: Bad hunk header: @@\ncode=bad_hunk_header\n\n#2 ERROR: No @@ hunks found in diff (not a unified diff, or missing hunks).\ncode=no_hunks"
+      }
+    }
+  ]
+}

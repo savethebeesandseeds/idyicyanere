@@ -230,6 +230,6 @@ export async function splitIntoUnits(params: {
     });
 
     // Rethrow with cause so upstream wrappers can surface the real error
-    throw new Error(`<phaseB_unitChanges> failed: ${ {cause: e} }`);
+    throw new Error(`<phaseB_unitChanges> failed: ${ msg }`);
   }
 }
