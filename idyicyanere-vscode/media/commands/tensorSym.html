@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="__CSP__" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tensor Symbol</title>
+
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: var(--vscode-font-family);
+        margin: 0;
+        padding: 12px;
+      }
+      .wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: stretch;
+      }
+      .panel {
+        border: 1px solid var(--vscode-editorWidget-border);
+        border-radius: 6px;
+        padding: 10px;
+      }
+      .panel h3 {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        opacity: 0.9;
+        font-weight: 600;
+      }
+      .inputs {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .field label {
+        font-size: 11px;
+        opacity: 0.8;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--vscode-input-border);
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        padding: 6px 8px;
+        border-radius: 5px;
+        outline: none;
+        font-family: var(--vscode-editor-font-family);
+      }
+      input[type="text"]:focus {
+        border-color: var(--vscode-focusBorder);
+      }
+
+      .previewBox {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .tensorPreview {
+        display: inline-block;
+        position: relative;
+        padding: 8px 14px;
+        min-height: 52px;
+      }
+      .tensorPreview .center {
+        font-size: 28px;
+        padding: 0 8px;
+      }
+      .tensorPreview .idx {
+        position: absolute;
+        font-size: 14px;
+        opacity: 0.95;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tensorPreview .tl {
+        left: 0;
+        top: 0;
+        transform: translate(-30%, -30%);
+      }
+      .tensorPreview .bl {
+        left: 0;
+        bottom: 0;
+        transform: translate(-30%, 30%);
+      }
+      .tensorPreview .tr {
+        right: 0;
+        top: 0;
+        transform: translate(30%, -30%);
+      }
+      .tensorPreview .br {
+        right: 0;
+        bottom: 0;
+        transform: translate(30%, 30%);
+      }
+
+      .callPreview {
+        font-family: var(--vscode-editor-font-family);
+        font-size: 12px;
+        padding: 8px;
+        border-radius: 6px;
+        background: var(--vscode-textCodeBlock-background);
+        border: 1px solid var(--vscode-editorWidget-border);
+        white-space: pre;
+        overflow-x: auto;
+      }
+
+      .hint {
+        font-size: 11px;
+        opacity: 0.75;
+        line-height: 1.3;
+      }
+      .status {
+        font-size: 11px;
+        opacity: 0.9;
+      }
+      .status.err {
+        color: var(--vscode-errorForeground);
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <div class="row">
+        <div class="panel" style="flex: 1">
+          <h3>Tensor Symbol Builder</h3>
+          <div class="inputs">
+            <div class="field" style="grid-column: 1">
+              <label>top_left</label>
+              <input id="topLeft" type="text" spellcheck="false" placeholder="a" />
+            </div>
+
+            <div class="field" style="grid-column: 2">
+              <label>center</label>
+              <input id="center" type="text" spellcheck="false" placeholder="A" />
+            </div>
+
+            <div class="field" style="grid-column: 3">
+              <label>top_right</label>
+              <input id="topRight" type="text" spellcheck="false" placeholder="c" />
+            </div>
+
+            <div class="field" style="grid-column: 1">
+              <label>bottom_left</label>
+              <input id="bottomLeft" type="text" spellcheck="false" placeholder="b" />
+            </div>
+
+            <div class="field" style="grid-column: 3">
+              <label>bottom_right</label>
+              <input id="bottomRight" type="text" spellcheck="false" placeholder="d" />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="width: 320px">
+          <h3>Preview</h3>
+          <div class="previewBox">
+            <div class="tensorPreview panel" style="padding: 10px">
+              <div id="p_tl" class="idx tl"></div>
+              <div id="p_bl" class="idx bl"></div>
+              <div id="p_tr" class="idx tr"></div>
+              <div id="p_br" class="idx br"></div>
+              <span id="p_center" class="center"></span>
+            </div>
+
+            <div id="callPreview" class="callPreview"></div>
+
+            <div class="hint">
+              ↑/↓ move field (top_left → bottom_left → center → top_right → bottom_right)<br />
+              Tab/Shift+Tab same behavior<br />
+              PageUp/PageDown: history • Enter: insert • Esc: close
+            </div>
+
+            <div id="histInfo" class="status"></div>
+            <div id="status" class="status"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script nonce="__NONCE__">
+      (function () {
+        var vscode = acquireVsCodeApi();
+        function el(id) {
+          return document.getElementById(id);
+        }
+
+        var inputs = {
+          topLeft: el("topLeft"),
+          bottomLeft: el("bottomLeft"),
+          center: el("center"),
+          topRight: el("topRight"),
+          bottomRight: el("bottomRight"),
+        };
+
+        var order = ["topLeft", "bottomLeft", "center", "topRight", "bottomRight"];
+
+        var p = {
+          tl: el("p_tl"),
+          bl: el("p_bl"),
+          c: el("p_center"),
+          tr: el("p_tr"),
+          br: el("p_br"),
+        };
+
+        var callPreview = el("callPreview");
+        var histInfo = el("histInfo");
+        var statusEl = el("status");
+
+        var macroCallName = "\\tensorSym";
+        var history = [];
+        var histCursor = -1; // -1 = draft
+        var draft = null;
+
+        function norm(s) {
+          return String(s || "").replace(/\r?\n/g, " ").trim();
+        }
+
+        function hasBadDelimiter(s) {
+          // SAFE NOTATION enforcement: disallow ',' and ')'
+          return /[,\)]/.test(s);
+        }
+
+        function validateState(s) {
+          var fields = [
+            ["center", s.center],
+            ["top_left", s.topLeft],
+            ["bottom_left", s.bottomLeft],
+            ["top_right", s.topRight],
+            ["bottom_right", s.bottomRight],
+          ];
+
+          for (var i = 0; i < fields.length; i++) {
+            var name = fields[i][0];
+            var v = norm(fields[i][1]);
+            if (hasBadDelimiter(v)) {
+              return "Illegal character in " + name + ". SAFE NOTATION forbids ',' and ')'.";
+            }
+          }
+          return "";
+        }
+
+        function getState() {
+          return {
+            topLeft: norm(inputs.topLeft.value),
+            bottomLeft: norm(inputs.bottomLeft.value),
+            center: norm(inputs.center.value),
+            topRight: norm(inputs.topRight.value),
+            bottomRight: norm(inputs.bottomRight.value),
+          };
+        }
+
+        function setState(s) {
+          inputs.topLeft.value = (s && s.topLeft) || "";
+          inputs.bottomLeft.value = (s && s.bottomLeft) || "";
+          inputs.center.value = (s && s.center) || "";
+          inputs.topRight.value = (s && s.topRight) || "";
+          inputs.bottomRight.value = (s && s.bottomRight) || "";
+          render();
+        }
+
+        function buildCall(s) {
+          var parts = [s.center, s.topLeft, s.bottomLeft, s.topRight, s.bottomRight];
+          return macroCallName + "(" + parts.join(",") + ")";
+        }
+
+        function safeTxt(v) {
+          v = norm(v);
+          return v ? v : "";
+        }
+
+        function render() {
+          var s = getState();
+
+          p.tl.textContent = safeTxt(s.topLeft);
+          p.bl.textContent = safeTxt(s.bottomLeft);
+          p.tr.textContent = safeTxt(s.topRight);
+          p.br.textContent = safeTxt(s.bottomRight);
+          p.c.textContent = safeTxt(s.center) || "A";
+
+          callPreview.textContent = buildCall({ 
+            center: s.center || "A",
+            topLeft: s.topLeft,
+            bottomLeft: s.bottomLeft,
+            topRight: s.topRight,
+            bottomRight: s.bottomRight
+          });
+
+          var err = validateState(s);
+          if (err) {
+            statusEl.textContent = err;
+            statusEl.classList.add("err");
+          } else {
+            statusEl.textContent = "";
+            statusEl.classList.remove("err");
+          }
+
+          if (!history.length) {
+            histInfo.textContent = "History: (empty)";
+          } else if (histCursor === -1) {
+            histInfo.textContent = "History: draft (PageUp to recall last)";
+          } else {
+            histInfo.textContent = "History: " + (histCursor + 1) + "/" + history.length + " (PageDown to return)";
+          }
+        }
+
+        function focusMove(delta) {
+          var a = document.activeElement;
+          var id = a && a.id ? a.id : "";
+          var idx = order.indexOf(id);
+          var cur = idx >= 0 ? idx : 0;
+
+          var next = cur + delta;
+          if (next < 0) next = 0;
+          if (next >= order.length) next = order.length - 1;
+
+          inputs[order[next]].focus();
+        }
+
+        function historyPrev() {
+          if (!history.length) return;
+
+          if (histCursor === -1) {
+            draft = getState();
+            histCursor = 0;
+          } else {
+            histCursor = Math.min(history.length - 1, histCursor + 1);
+          }
+          setState(history[histCursor]);
+        }
+
+        function historyNext() {
+          if (!history.length) return;
+          if (histCursor === -1) return;
+
+          histCursor = histCursor - 1;
+          if (histCursor < 0) {
+            histCursor = -1;
+            if (draft) setState(draft);
+            draft = null;
+          } else {
+            setState(history[histCursor]);
+          }
+        }
+
+        function tryDump() {
+          var s = getState();
+          if (!s.center) s.center = "A";
+
+          var err = validateState(s);
+          if (err) {
+            statusEl.textContent = err;
+            statusEl.classList.add("err");
+            return;
+          }
+
+          vscode.postMessage({ type: "dump", args: s });
+        }
+
+        function keyIs(e, a, b) {
+          // match against e.key and e.code; accept common legacy names
+          var k = e.key || "";
+          var c = e.code || "";
+          return k === a || k === b || c === a || c === b;
+        }
+
+        function onKeyDown(e) {
+          // do not interfere with IME composition
+          if (e.isComposing) return;
+
+          var handled = false;
+
+          if (keyIs(e, "ArrowUp", "Up")) {
+            focusMove(-1);
+            handled = true;
+          } else if (keyIs(e, "ArrowDown", "Down")) {
+            focusMove(1);
+            handled = true;
+          } else if (keyIs(e, "PageUp", "Prior")) {
+            historyPrev();
+            handled = true;
+          } else if (keyIs(e, "PageDown", "Next")) {
+            historyNext();
+            handled = true;
+          } else if (keyIs(e, "Enter", "Return")) {
+            tryDump();
+            handled = true;
+          } else if (keyIs(e, "Escape", "Esc")) {
+            vscode.postMessage({ type: "cancel" });
+            handled = true;
+          } else if (e.key === "Tab") {
+            focusMove(e.shiftKey ? -1 : 1);
+            handled = true;
+          }
+
+          if (handled) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          }
+        }
+
+        // Bind key handling:
+        // - on each input (most reliable)
+        // - also on document capture as a fallback
+        for (var k in inputs) {
+          if (inputs[k]) {
+            inputs[k].addEventListener("keydown", onKeyDown, true);
+            inputs[k].addEventListener("input", render);
+          }
+        }
+        document.addEventListener("keydown", onKeyDown, true);
+
+        window.addEventListener("message", function (event) {
+          var m = event.data || {};
+          if (m.type === "init") {
+            history = Array.isArray(m.history) ? m.history : [];
+            macroCallName = typeof m.macroCallName === "string" ? m.macroCallName : "\\tensorSym";
+            histCursor = -1;
+            draft = null;
+            render();
+            inputs.topLeft.focus();
+            return;
+          }
+          if (m.type === "status") {
+            statusEl.textContent = String(m.text || "");
+            if (m.isError) statusEl.classList.add("err");
+            else statusEl.classList.remove("err");
+            return;
+          }
+        });
+
+        try {
+          vscode.postMessage({ type: "ready" });
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>

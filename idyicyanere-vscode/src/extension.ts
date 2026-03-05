@@ -28,8 +28,30 @@ import { runShowLogsCommand } from "./commands/showLogsCommand";
 import { runNukeCommand } from "./commands/nukeCommand";
 import { runDebugRagCommand } from "./commands/debugRagCommand";
 
+import { runScienceWritingTensorSymCommand } from "./commands/scienceWritingTensorSymCommand";
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 export async function activate(context: vscode.ExtensionContext) {
-  vscode.window.showInformationMessage("idyicyanere activated");
+  try {
+    vscode.window.showInformationMessage("idyicyanere activated");
 
   registerLogger(context);
 
@@ -41,10 +63,10 @@ export async function activate(context: vscode.ExtensionContext) {
     workspaceFolders: vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? []
   });
 
-  const paths = await StoragePaths.init(context);
+  const paths = await withTimeout(StoragePaths.init(context), 10000, "StoragePaths.init()");
 
   const config = new ConfigService(paths);
-  await config.ensure();
+  await withTimeout(config.ensure(), 10000, "ConfigService.ensure()");
 
   // Apply logging level from config.json
   log.setLevel(config.data.logging.level);
@@ -230,13 +252,13 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   const manifest = new ManifestService(paths);
-  await manifest.load();
+  await withTimeout(manifest.load(), 10000, "ManifestService.load()");
 
   const contextDump = new ContextDumpService(paths, config, manifest);
 
   // Native vector store (IdyDB C++ addon)
   const store = new IdyDbStore(context, paths.dbPath);
-  await store.open();
+  await withTimeout(store.open(), 15000, "IdyDbStore.open()");
 
   const openai = new OpenAIService(context, config);
   const indexer = new IndexService(config, manifest, store, openai);
@@ -253,7 +275,7 @@ export async function activate(context: vscode.ExtensionContext) {
     for (const r of entry.rows ?? []) used.add(r);
   }
 
-  const nextRow = await store.getNextRow(); // rows are 1..nextRow-1 potentially used/holes
+  const nextRow = await withTimeout(store.getNextRow(), 10000, "IdyDbStore.getNextRow()"); // rows are 1..nextRow-1 potentially used/holes
   const free: number[] = [];
 
   // Efficient gap-finding: sort used rows and fill gaps
@@ -320,6 +342,61 @@ export async function activate(context: vscode.ExtensionContext) {
       webviewOptions: { retainContextWhenHidden: true }
     })
   );
+
+  let pdfViewType: string | undefined;
+  let runOpenPdf:
+    | ((viewType: string, uri?: vscode.Uri) => Promise<void>)
+    | undefined;
+  let pdfProviderRegistered = false;
+
+  const ensurePdfFeatureLoaded = async (): Promise<boolean> => {
+    if (pdfProviderRegistered && pdfViewType && runOpenPdf) return true;
+
+    try {
+      const [pdfProviderMod, openPdfMod] = await Promise.all([
+        import("./views/pdfView/pdfCustomEditorProvider"),
+        import("./commands/openPdfCommand")
+      ]);
+
+      const Provider = pdfProviderMod.PdfCustomEditorProvider as {
+        new (ctx: vscode.ExtensionContext): vscode.CustomReadonlyEditorProvider<vscode.CustomDocument>;
+        viewType: string;
+      };
+
+      if (!Provider || typeof Provider.viewType !== "string") {
+        throw new Error("Invalid PdfCustomEditorProvider export");
+      }
+
+      if (typeof openPdfMod.runOpenPdfCommand !== "function") {
+        throw new Error("Invalid runOpenPdfCommand export");
+      }
+
+      pdfViewType = Provider.viewType;
+      runOpenPdf = openPdfMod.runOpenPdfCommand;
+
+      if (!pdfProviderRegistered) {
+        context.subscriptions.push(
+          vscode.window.registerCustomEditorProvider(
+            pdfViewType,
+            new Provider(context),
+            {
+              webviewOptions: { retainContextWhenHidden: true },
+              supportsMultipleEditorsPerDocument: true
+            }
+          )
+        );
+        pdfProviderRegistered = true;
+      }
+
+      return true;
+    } catch (err) {
+      log.caught("ensurePdfFeatureLoaded", err);
+      return false;
+    }
+  };
+
+  // Lazy-load PDF feature in background; activation continues even if PDF feature fails.
+  void ensurePdfFeatureLoaded();
 
   // --- Commands (moved to per-command files) ---
 
@@ -426,6 +503,25 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("idyicyanere.sciencewriting.tensorSym", () =>
+      runScienceWritingTensorSymCommand(context, context.globalState)
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("idyicyanere.openPdf", async (uri?: vscode.Uri) => {
+      const ok = await ensurePdfFeatureLoaded();
+      if (!ok || !runOpenPdf || !pdfViewType) {
+        vscode.window.showErrorMessage(
+          "idyicyanere: PDF viewer could not be initialized in this environment."
+        );
+        return;
+      }
+      await runOpenPdf(pdfViewType, uri);
+    })
+  );
+
   configView = new ConfigViewProvider(
     context, 
     context.extensionUri, 
@@ -438,5 +534,11 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  log.info("activate() complete");
+    log.info("activate() complete");
+  } catch (err) {
+    log.caught("activate()", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`idyicyanere failed to activate: ${msg}`);
+    throw err;
+  }
 }

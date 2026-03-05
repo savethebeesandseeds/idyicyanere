@@ -20,7 +20,13 @@
 
       "conditions": [
         ["OS==\"linux\"", {
-          "libraries": [ "-lssl", "-lcrypto" ]
+          "libraries": [
+            "-Wl,-Bstatic",
+            "-lcrypto",
+            "-Wl,-Bdynamic",
+            "-ldl",
+            "-lpthread"
+          ]
         }],
 
         ["OS==\"mac\"", {

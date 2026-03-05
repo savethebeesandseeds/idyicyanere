@@ -38,6 +38,245 @@ const IDYDB_CREATE = 7;
 const IDYDB_SIM_COSINE = 1;
 const IDYDB_SIM_L2 = 2;
 
+type FallbackRow = {
+  values: Map<number, any>;
+};
+
+type IdyDbRuntime = {
+  open: (dbPath: string, flags: number) => void;
+  close: () => void;
+  columnNextRow: (col: number) => number;
+  ragUpsertText: (textCol: number, vecCol: number, row: number, text: string, vec: Float32Array) => void;
+  insertConstChar: (col: number, row: number, value: string) => void;
+  insertBool: (col: number, row: number, value: boolean) => void;
+  insertInt: (col: number, row: number, value: number) => void;
+  setRowsIncluded: (includedCol: number, rows: number[], included: boolean) => void;
+  deleteCell: (col: number, row: number) => void;
+  ragQueryHitsIncludedOnly: (
+    textCol: number,
+    vecCol: number,
+    includedCol: number,
+    relCol: number,
+    queryVec: Float32Array,
+    limit: number,
+    metric: number,
+    metaCols: number[],
+    relFilter: string
+  ) => Array<{ row?: number; score: number; text: string; meta?: Record<string, any> }>;
+};
+
+type AddonModule = {
+  IdyDb: new () => IdyDbRuntime;
+  __fallback?: boolean;
+  __reason?: string;
+};
+
+function dot(a: Float32Array, b: Float32Array): number {
+  const n = Math.min(a.length, b.length);
+  let out = 0;
+  for (let i = 0; i < n; i++) out += a[i] * b[i];
+  return out;
+}
+
+function norm2(a: Float32Array): number {
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out += a[i] * a[i];
+  return Math.sqrt(out);
+}
+
+function l2(a: Float32Array, b: Float32Array): number {
+  const n = Math.min(a.length, b.length);
+  let out = 0;
+  for (let i = 0; i < n; i++) {
+    const d = a[i] - b[i];
+    out += d * d;
+  }
+  return Math.sqrt(out);
+}
+
+function createFallbackAddon(reason: string): AddonModule {
+  class FallbackIdyDb implements IdyDbRuntime {
+    private rows = new Map<number, FallbackRow>();
+    private persistPath = "";
+
+    private static encodeValue(v: any): any {
+      if (v instanceof Float32Array) return { __f32: Array.from(v) };
+      return v;
+    }
+
+    private static decodeValue(v: any): any {
+      if (v && typeof v === "object" && Array.isArray(v.__f32)) {
+        return new Float32Array(v.__f32.map((x: any) => Number(x) || 0));
+      }
+      return v;
+    }
+
+    private loadPersisted(): void {
+      if (!this.persistPath || !fs.existsSync(this.persistPath)) return;
+      try {
+        const raw = fs.readFileSync(this.persistPath, "utf8");
+        const parsed = JSON.parse(raw);
+        this.rows.clear();
+        for (const r of parsed?.rows ?? []) {
+          const row = Math.trunc(Number(r?.row));
+          if (!Number.isFinite(row) || row <= 0) continue;
+          const values = new Map<number, any>();
+          const src = r?.values ?? {};
+          for (const [k, v] of Object.entries(src)) {
+            const col = Math.trunc(Number(k));
+            if (!Number.isFinite(col) || col <= 0) continue;
+            values.set(col, FallbackIdyDb.decodeValue(v));
+          }
+          this.rows.set(row, { values });
+        }
+      } catch (err) {
+        log.warn("Fallback IdyDB: failed to load persisted store; starting empty", {
+          reason: err instanceof Error ? err.message : String(err)
+        });
+        this.rows.clear();
+      }
+    }
+
+    private persist(): void {
+      if (!this.persistPath) return;
+      try {
+        const rows: Array<{ row: number; values: Record<string, any> }> = [];
+        for (const [row, rec] of this.rows.entries()) {
+          const values: Record<string, any> = {};
+          for (const [col, val] of rec.values.entries()) {
+            values[String(col)] = FallbackIdyDb.encodeValue(val);
+          }
+          rows.push({ row, values });
+        }
+        const json = JSON.stringify({ rows });
+        fs.writeFileSync(this.persistPath, json, "utf8");
+      } catch (err) {
+        log.warn("Fallback IdyDB: failed to persist store", {
+          reason: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+
+    open(dbPath: string, _flags: number): void {
+      this.persistPath = `${dbPath}.fallback.json`;
+      this.loadPersisted();
+    }
+
+    close(): void {
+      this.persist();
+    }
+
+    private getRow(row: number): FallbackRow {
+      let r = this.rows.get(row);
+      if (!r) {
+        r = { values: new Map<number, any>() };
+        this.rows.set(row, r);
+      }
+      return r;
+    }
+
+    columnNextRow(col: number): number {
+      let max = 0;
+      for (const [row, rec] of this.rows.entries()) {
+        if (rec.values.has(col) && row > max) max = row;
+      }
+      return max + 1;
+    }
+
+    ragUpsertText(textCol: number, vecCol: number, row: number, text: string, vec: Float32Array): void {
+      const rec = this.getRow(row);
+      rec.values.set(textCol, String(text ?? ""));
+      rec.values.set(vecCol, new Float32Array(vec ?? []));
+      this.persist();
+    }
+
+    insertConstChar(col: number, row: number, value: string): void {
+      this.getRow(row).values.set(col, String(value ?? ""));
+      this.persist();
+    }
+
+    insertBool(col: number, row: number, value: boolean): void {
+      this.getRow(row).values.set(col, !!value);
+      this.persist();
+    }
+
+    insertInt(col: number, row: number, value: number): void {
+      this.getRow(row).values.set(col, Math.trunc(Number(value ?? 0)));
+      this.persist();
+    }
+
+    setRowsIncluded(includedCol: number, rows: number[], included: boolean): void {
+      for (const row of rows ?? []) {
+        if (!Number.isFinite(Number(row)) || row <= 0) continue;
+        this.getRow(Math.trunc(row)).values.set(includedCol, !!included);
+      }
+      this.persist();
+    }
+
+    deleteCell(col: number, row: number): void {
+      const rec = this.rows.get(row);
+      if (!rec) return;
+      rec.values.delete(col);
+      if (!rec.values.size) this.rows.delete(row);
+      this.persist();
+    }
+
+    ragQueryHitsIncludedOnly(
+      textCol: number,
+      vecCol: number,
+      includedCol: number,
+      relCol: number,
+      queryVec: Float32Array,
+      limit: number,
+      metric: number,
+      metaCols: number[],
+      relFilter: string
+    ): Array<{ row?: number; score: number; text: string; meta?: Record<string, any> }> {
+      const out: Array<{ row?: number; score: number; text: string; meta?: Record<string, any> }> = [];
+      const relNeedle = String(relFilter ?? "");
+      const q = queryVec instanceof Float32Array ? queryVec : new Float32Array(queryVec ?? []);
+      const qNorm = norm2(q);
+
+      for (const [row, rec] of this.rows.entries()) {
+        const included = !!rec.values.get(includedCol);
+        if (!included) continue;
+
+        const rel = String(rec.values.get(relCol) ?? "");
+        if (relNeedle && rel !== relNeedle) continue;
+
+        const text = String(rec.values.get(textCol) ?? "");
+        const vecRaw = rec.values.get(vecCol);
+        if (!text || !(vecRaw instanceof Float32Array) || !vecRaw.length) continue;
+
+        let score = 0;
+        if (metric === IDYDB_SIM_L2) {
+          // Keep "higher is better" sort semantics by negating distance.
+          score = -l2(q, vecRaw);
+        } else {
+          const denom = qNorm * norm2(vecRaw);
+          score = denom > 0 ? dot(q, vecRaw) / denom : 0;
+        }
+
+        const meta: Record<string, any> = {};
+        for (const c of metaCols ?? []) {
+          if (rec.values.has(c)) meta[String(c)] = rec.values.get(c);
+        }
+
+        out.push({ row, score, text, meta });
+      }
+
+      out.sort((a, b) => b.score - a.score);
+      return out.slice(0, Math.max(1, Math.trunc(Number(limit ?? 1))));
+    }
+  }
+
+  return {
+    IdyDb: FallbackIdyDb,
+    __fallback: true,
+    __reason: reason
+  };
+}
+
 export function loadAddon(context: vscode.ExtensionContext) {
   const addonPath = path.join(
     context.extensionPath,
@@ -49,11 +288,19 @@ export function loadAddon(context: vscode.ExtensionContext) {
   );
 
   if (!fs.existsSync(addonPath)) {
-    throw new Error(`idydb addon missing at: ${addonPath}`);
+    const reason = `idydb addon missing at: ${addonPath}`;
+    log.warn("Native IdyDB addon unavailable; using JS fallback", { reason });
+    return createFallbackAddon(reason);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return require(addonPath);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require(addonPath) as AddonModule;
+  } catch (err: any) {
+    const reason = err?.message ?? String(err);
+    log.warn("Native IdyDB addon failed to load; using JS fallback", { addonPath, reason });
+    return createFallbackAddon(reason);
+  }
 }
 
 type ChunkMeta = {
@@ -65,8 +312,8 @@ type ChunkMeta = {
 };
 
 export class IdyDbStore {
-  private addon: any;
-  private db: any;
+  private addon: AddonModule;
+  private db: IdyDbRuntime;
 
   // ---- free row pool (in-memory) ----
   private freeRows: number[] = [];
@@ -82,6 +329,11 @@ export class IdyDbStore {
     private readonly dbPath: string) {
       this.addon = loadAddon(context);
       this.db = new this.addon.IdyDb();
+      if (this.addon.__fallback) {
+        log.warn("IdyDbStore running in JS fallback mode (native addon unavailable)", {
+          reason: this.addon.__reason ?? "unknown"
+        });
+      }
   }
 
   private async runExclusive<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
@@ -115,6 +367,11 @@ export class IdyDbStore {
     } catch (e: any) {
       // If it doesn't exist, that's fine.
       if (e?.code !== "ENOENT") log.caught("IdyDbStore.deleteDbFile", e);
+    }
+    try {
+      await fsp.unlink(`${this.dbPath}.fallback.json`);
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") log.caught("IdyDbStore.deleteDbFile fallback", e);
     }
   }
 

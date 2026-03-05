@@ -1,0 +1,12 @@
+% idyicyanere macros (auto-created)
+% Include in your preamble with one of:
+%   \input{.idyicyanere/idyicyanere-macros.tex}
+% or
+%   \InputIfFileExists{.idyicyanere/idyicyanere-macros.tex}{}{}
+
+% Tensor symbol:
+% Usage: \tensorSym(A,a,b,c,d)  ->  {}^a_b A^c_d
+% Note: This form is delimited by commas and a closing ')'. Avoid literal ',' or ')' inside arguments.
+
+\def\tensorSym(#1,#2,#3,#4,#5){\ensuremath{{}^{#2}_{#3}{#1}^{#4}_{#5}}}
+

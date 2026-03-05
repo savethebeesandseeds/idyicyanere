@@ -1,0 +1,12 @@
+% idyicyanere macros (bundled)
+% This file is copied into: <workspace>/.idyicyanere/idyicyanere-macros.tex
+%
+% Usage:
+%   \tensorSym(A,a,b,c,d)   ->   {}^a_b A^c_d
+%
+% SAFE NOTATION:
+%   Arguments must NOT contain ',' or ')' because this macro is delimiter-parsed.
+
+\def\tensorSym(#1,#2,#3,#4,#5){%
+  \ensuremath{{}^{#2}_{#3}{#1}^{#4}_{#5}}%
+}

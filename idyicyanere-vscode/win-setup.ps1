@@ -174,7 +174,15 @@ Write-Host "--- 4/5 Fixing Environment (Toolchain & PATH) ---" -ForegroundColor 
 
 $env:OPENSSL_INCLUDE_DIR = "C:\vcpkg\installed\x64-windows\include"
 $env:OPENSSL_LIB_DIR     = "C:\vcpkg\installed\x64-windows\lib"
+$env:OPENSSL_BIN_DIR     = "C:\vcpkg\installed\x64-windows\bin"
 $env:GYP_MSVS_VERSION    = "2022"
+
+foreach ($dll in @("libcrypto-3-x64.dll", "libssl-3-x64.dll")) {
+    $dllPath = Join-Path $env:OPENSSL_BIN_DIR $dll
+    if (-not (Test-Path $dllPath)) {
+        throw "Missing OpenSSL runtime DLL: $dllPath"
+    }
+}
 
 # Workaround: node-gyp sometimes lags behind newest VS versions
 Run-OrThrow "npm" "install" "-g" "node-gyp"

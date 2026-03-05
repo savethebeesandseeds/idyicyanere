@@ -5,7 +5,7 @@
   "description": "Intelligent file editing",
   "publisher": "waajacu",
   "icon": "media/icon.png",
-  "version": "0.4.0",
+  "version": "0.4.4",
   "license": "MIT",
   "categories": ["Machine Learning", "Programming Languages", "Other"],
   "keywords": ["ai", "assistant", "refactor", "code editing", "copilot", "llm", "openai"],
@@ -20,7 +20,7 @@
   "homepage": "https://github.com/savethebeesandseeds/idyicyanere#readme",
   "scripts": {
     "compile": "tsc -p .",
-    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --minify --external:./native/*",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --external:./native/*",
     
     "build:native": "node-gyp rebuild --directory native/idydb-addon",
     "build:native:win": "node-gyp rebuild --directory native/idydb-addon --msvs_version=2022",
@@ -29,11 +29,12 @@
     
     "vsix:clean:win": "node -e \"require('fs').rmSync('dist-vsix/idyicyanere-win32-x64.vsix', {force:true});\"",
     "vsix:clean:linux": "node -e \"require('fs').rmSync('dist-vsix/idyicyanere-linux-x64.vsix', {force:true});\"",
+    "copy:openssl:dlls:win": "node -e \"const fs=require('fs'); const path=require('path'); const src=process.env.OPENSSL_BIN_DIR || 'C:/vcpkg/installed/x64-windows/bin'; const dst=path.join('native','idydb-addon','build','Release'); const names=['libcrypto-3-x64.dll','libssl-3-x64.dll']; if(!fs.existsSync(dst)) fs.mkdirSync(dst,{recursive:true}); for(const n of names){const s=path.join(src,n); const d=path.join(dst,n); if(fs.existsSync(s)){fs.copyFileSync(s,d); console.log('copied',n,'from',s);} else {console.warn('missing',s);} }\"",
 
-    "vsix:package": "node -e \"const {execSync}=require('child_process'); const out='dist-vsix/idyicyanere-'+process.platform+'-'+process.arch+'.vsix'; execSync('npx vsce package --no-dependencies -o '+out,{stdio:'inherit'});\"",
+    "vsix:package": "node -e \"const {execSync}=require('child_process'); const out='dist-vsix/idyicyanere-'+process.platform+'-'+process.arch+'.vsix'; execSync('npx vsce package --no-dependencies --allow-unused-files-pattern -o '+out,{stdio:'inherit'});\"",
 
     "vsix:linux": "npm run vsix:prepare && npm run vsix:clean:linux && npm install && npm run bundle && npm run build:native && npm run vsix:package",
-    "vsix:win": "npm run vsix:prepare && npm run vsix:clean:win && npm install && npm run bundle && npm run build:native:win && npm run vsix:package"
+    "vsix:win": "npm run vsix:prepare && npm run vsix:clean:win && npm install && npm run bundle && npm run build:native:win && npm run copy:openssl:dlls:win && npm run vsix:package"
   },
   "contributes": {
     "keybindings": [
@@ -54,9 +55,36 @@
       { "command": "idyicyanere.dumpContext.PickModal", "title": "idyicyanere: Dump Context (Picker)" },
       { "command": "idyicyanere.dumpContext.Indexed", "title": "idyicyanere: Dump Context (Indexed)" },
       { "command": "idyicyanere.dumpContext.OpenLatest", "title": "idyicyanere: Dump Context Open Latest " },
-      { "command": "idyicyanere.dumpContext.OpenBackups", "title": "idyicyanere: Dump Context Open Backups" }
+      { "command": "idyicyanere.dumpContext.OpenBackups", "title": "idyicyanere: Dump Context Open Backups" },
+      { "command": "idyicyanere.sciencewriting.tensorSym", "title": "idyicyanere: Insert Tensor Symbol" },
+      { "command": "idyicyanere.openPdf", "title": "idyicyanere: Open PDF" }
     ],
+    "customEditors": [
+      {
+        "viewType": "idyicyanere.pdfViewer",
+        "displayName": "idyicyanere PDF Viewer",
+        "selector": [{ "filenamePattern": "*.pdf" }, { "filenamePattern": "*.PDF" }],
+        "priority": "default"
+      }
+    ],
+    "configuration": {
+      "title": "idyicyanere",
+      "properties": {
+        "idyicyanere.pdfViewer.blockActiveContent": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, block rendering PDFs that appear to include active content such as JavaScript or automatic actions."
+        }
+      }
+    },
     "menus": {
+      "explorer/context": [
+        {
+          "command": "idyicyanere.openPdf",
+          "group": "navigation",
+          "when": "resourceExtname == .pdf"
+        }
+      ],
       "view/title": [
         { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereFiles" },
         { "command": "idyicyanere.refreshAll", "group": "navigation", "when": "view == idyicyanereChat" },
@@ -96,7 +124,7 @@
     "openai": "^6.17.0"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.27.3",
     "@types/node": "^25.2.0",
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "^3.0.0",
@@ -108,6 +136,7 @@
     "dist/extension.js",
     "media/**",
     "native/idydb-addon/build/Release/idydb.node",
+    "native/idydb-addon/build/Release/*.dll",
     "package.json",
     "README.md",
     "LICENSE"

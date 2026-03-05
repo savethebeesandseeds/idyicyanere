@@ -75,10 +75,22 @@ declare const require: any;
 
 let _tsCached: any | null | undefined;
 
+function dynamicRequire(id: string): any | null {
+  try {
+    // Keep this indirect so bundlers don't inline optional runtime dependencies.
+    const req = (0, eval)("require") as ((name: string) => any) | undefined;
+    if (typeof req !== "function") return null;
+    return req(id);
+  } catch {
+    return null;
+  }
+}
+
 function getTypeScript(): any | null {
   if (_tsCached !== undefined) return _tsCached;
   try {
-    _tsCached = require("typescript");
+    _tsCached = dynamicRequire("typescript");
+    if (!_tsCached) _tsCached = null;
   } catch {
     _tsCached = null;
   }

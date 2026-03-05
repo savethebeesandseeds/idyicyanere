@@ -20,7 +20,7 @@ chmod +x setup-linux.sh
 First start a container, to avoid installing a lot of things in the host
 ```PowerShell
 cd /path/to/idyicyanere-vscode
-docker run --rm -it --name idyicyanere_win -v "%cd%:C:\idyicyanere" -w "C:\idyicyanere" mcr.microsoft.com/windows/servercore:ltsc2022 powershell
+docker run -it --name idyicyanere_win -v "%cd%:C:\idyicyanere" -w "C:\idyicyanere" mcr.microsoft.com/windows/servercore:ltsc2022 powershell
 docker exec -it idyicyanere_win powershell
 ```
 
